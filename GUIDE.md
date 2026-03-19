@@ -20,14 +20,16 @@ Claude에서 Salesforce 데이터를 직접 조회하고 생성/수정/삭제할
 - [Homebrew](https://brew.sh) 설치 완료
 - Salesforce 계정 (로그인 가능한 상태)
 
+> **터미널 여는 방법**: `Cmd + Space` → "터미널" 검색 → 실행. 이후 모든 명령어는 터미널에 붙여넣기(`Cmd + V`) 후 Enter를 눌러 실행합니다.
+
 ---
 
-## Step 1. Node.js 설치
+## Step 1. Node.js & Git 설치
 
-터미널을 열고 아래 명령어를 실행합니다.
+터미널에 아래 명령어를 실행합니다.
 
 ```bash
-brew install node
+brew install node git
 ```
 
 설치 확인:
@@ -96,28 +98,38 @@ sf org login web --instance-url https://[내 org 주소].my.salesforce.com
 sf org display --target-org [내 Salesforce 이메일] --json
 ```
 
-실행 결과에서 `accessToken`과 `instanceUrl` 값을 복사해둡니다.
+> 예시: `sf org display --target-org sunny@company.com --json`
+
+터미널에 아래와 같은 결과가 출력됩니다. **따옴표 없이** `accessToken`과`instanceUrl` 값만 복사합니다.
 
 ```json
 {
-  "accessToken": "00D2w000...여기가 토큰...",
-  "instanceUrl": "https://channel-b.my.salesforce.com"
+  "result": {
+    "accessToken": "00D2w00000RpEQN!AQEAQFru9ZL...(긴 문자열)...",
+    "instanceUrl": "https://yourorg.my.salesforce.com"
+  }
 }
 ```
+
+복사할 값:
+- `accessToken`: `00D2w00000RpEQN!AQEA...` (따옴표 제외)
+- `instanceUrl`: `https://yourorg.my.salesforce.com` (따옴표 제외)
 
 ---
 
 ## Step 7. Claude Desktop 설정
 
-아래 경로의 파일을 텍스트 편집기로 엽니다.
+터미널에서 아래 명령어로 설정 파일을 바로 엽니다.
 
+```bash
+open ~/Library/Application\ Support/Claude/claude_desktop_config.json
 ```
-~/Library/Application Support/Claude/claude_desktop_config.json
-```
 
-> **파일 열기**: Finder → 이동 → 폴더로 이동 → 위 경로 붙여넣기
+> 파일이 없다는 오류가 나면: `touch ~/Library/Application\ Support/Claude/claude_desktop_config.json && open ~/Library/Application\ Support/Claude/claude_desktop_config.json`
 
-파일 내용을 아래와 같이 수정합니다. (기존 내용이 있다면 `mcpServers` 안에 추가합니다)
+텍스트 편집기에서 파일 내용을 아래와 같이 수정합니다.
+- 파일이 비어있으면 아래 내용 전체를 붙여넣기
+- 기존에 다른 `mcpServers` 설정이 있다면 `"salesforce": { ... }` 부분만 추가
 
 ```json
 {
@@ -136,7 +148,7 @@ sf org display --target-org [내 Salesforce 이메일] --json
 }
 ```
 
-> **내 맥 유저명 확인**: 터미널에서 `whoami` 실행
+> **내 맥 유저명 확인**: 터미널에서 `whoami` 실행 (예: `sunny` → `/Users/sunny/Downloads/...`)
 
 ---
 
