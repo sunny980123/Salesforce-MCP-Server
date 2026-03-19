@@ -229,6 +229,26 @@ class SalesforceClient {
       throw wrapError(error);
     }
   }
+
+  private toolingBaseUrl(): string {
+    return `${this.instanceUrl}/services/data/${SF_API_VERSION}/tooling`;
+  }
+
+  async toolingQuery<T = SalesforceRecord>(soql: string): Promise<QueryResult<T>> {
+    await this.ensureAuth();
+    try {
+      const response = await this.client.get<QueryResult<T>>(
+        `${this.toolingBaseUrl()}/query`,
+        {
+          params: { q: soql },
+          headers: this.authHeaders(),
+        }
+      );
+      return response.data;
+    } catch (error) {
+      throw wrapError(error);
+    }
+  }
 }
 
 function wrapError(error: unknown): Error {
