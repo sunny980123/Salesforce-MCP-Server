@@ -1,38 +1,70 @@
 # Salesforce MCP Server
 
-Salesforce CRM과 Claude를 연결하는 MCP 서버입니다. SOQL 쿼리, 레코드 조회/생성/수정/삭제, 오브젝트 메타데이터 탐색 기능을 제공합니다.
+Salesforce CRM과 Claude를 연결하는 MCP 서버입니다. 표준 SOQL/SOSL 쿼리, 레코드 CRUD, 오브젝트 메타데이터 탐색, **Tooling API(ValidationRule·Flow·Apex 메타데이터)** 기능을 제공합니다.
 
-## 빠른 시작
+## 빠른 시작 (npx — 설치 없이 바로 사용)
 
-**처음 설치하는 경우** → [GUIDE.md](./GUIDE.md) 를 따라주세요. (비개발자도 따라할 수 있는 단계별 가이드)
+**클론/빌드 필요 없음!** Access Token만 발급하면 바로 사용 가능합니다.
 
----
-
-## 인증 방식
-
-이 서버는 **Salesforce CLI를 통한 Access Token** 방식을 사용합니다. Security Token이나 Connected App 설정이 필요 없습니다.
-
-### 환경변수
-
-| 변수 | 설명 |
-|------|------|
-| `SALESFORCE_ACCESS_TOKEN` | SF CLI로 발급한 Access Token |
-| `SALESFORCE_INSTANCE_URL` | Salesforce org URL (예: `https://yourorg.my.salesforce.com`) |
-
-### Access Token 발급 방법
+### 1단계: Access Token 발급
 
 ```bash
-# 1. Salesforce CLI 설치
+# Salesforce CLI 설치 (처음 한 번만)
 brew install sf
 
-# 2. 브라우저 로그인으로 인증
+# 브라우저 로그인
 sf org login web --instance-url https://[내 org 주소].my.salesforce.com
 
-# 3. Access Token 확인
+# Access Token 확인
 sf org display --target-org [내 이메일] --json
 ```
 
-### Claude Desktop 설정 (`claude_desktop_config.json`)
+`accessToken` 값과 `instanceUrl` 값을 복사해두세요.
+
+### 2단계: Claude Code 설정
+
+```bash
+claude mcp add salesforce -e SALESFORCE_ACCESS_TOKEN=00D2w... -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com -- npx -y @sunny980123/salesforce-mcp-server
+```
+
+또는 `~/.claude/claude_desktop_config.json` 직접 편집:
+
+```json
+{
+  "mcpServers": {
+    "salesforce": {
+      "command": "npx",
+      "args": ["-y", "@sunny980123/salesforce-mcp-server"],
+      "env": {
+        "SALESFORCE_ACCESS_TOKEN": "00D2w...",
+        "SALESFORCE_INSTANCE_URL": "https://yourorg.my.salesforce.com"
+      }
+    }
+  }
+}
+```
+
+### 3단계: 확인
+
+```bash
+claude mcp list
+```
+
+`salesforce` 서버가 목록에 보이면 완료입니다 🎉
+
+---
+
+## 소스에서 직접 빌드 (개발자용)
+
+**처음 설치하는 경우** → [GUIDE.md](./GUIDE.md) 를 따라주세요. (비개발자도 따라할 수 있는 단계별 가이드)
+
+```bash
+git clone https://github.com/sunny980123/Salesforce-MCP-Server.git
+cd Salesforce-MCP-Server
+npm install && npm run build
+```
+
+Claude Code 설정:
 
 ```json
 {
@@ -51,12 +83,16 @@ sf org display --target-org [내 이메일] --json
 
 ---
 
-## 빌드
+## 인증 방식
 
-```bash
-npm install
-npm run build
-```
+이 서버는 **Salesforce CLI를 통한 Access Token** 방식을 사용합니다. Security Token이나 Connected App 설정이 필요 없습니다.
+
+### 환경변수
+
+| 변수 | 설명 |
+|------|------|
+| `SALESFORCE_ACCESS_TOKEN` | SF CLI로 발급한 Access Token |
+| `SALESFORCE_INSTANCE_URL` | Salesforce org URL (예: `https://yourorg.my.salesforce.com`) |
 
 ---
 
@@ -120,4 +156,11 @@ sf org login web --instance-url https://[내 org 주소].my.salesforce.com
 sf org display --target-org [내 이메일] --json
 ```
 
-`claude_desktop_config.json`의 `SALESFORCE_ACCESS_TOKEN` 값을 새 토큰으로 교체 후 Claude Desktop 재시작.
+`SALESFORCE_ACCESS_TOKEN` 값을 새 토큰으로 교체 후 Claude 재시작.
+
+**npx 사용 시 빠른 갱신:**
+
+```bash
+claude mcp remove salesforce
+claude mcp add salesforce -e SALESFORCE_ACCESS_TOKEN=새토큰 -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com -- npx -y @sunny980123/salesforce-mcp-server
+```

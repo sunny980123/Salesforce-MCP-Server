@@ -1,17 +1,40 @@
 {
-  "name": "salesforce-mcp-server",
-  "version": "1.0.0",
-  "description": "MCP server for Salesforce CRM integration",
+  "name": "@sunny980123/salesforce-mcp-server",
+  "version": "1.1.0",
+  "description": "Salesforce MCP Server — Claude와 Salesforce CRM을 연결하는 MCP 서버. 표준 SOQL/SOSL과 Tooling API를 모두 지원합니다.",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "salesforce-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
   },
   "engines": {
     "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "mcp",
+    "salesforce",
+    "claude",
+    "crm",
+    "soql",
+    "tooling-api"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sunny980123/Salesforce-MCP-Server.git"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",
