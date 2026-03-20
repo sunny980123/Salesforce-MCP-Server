@@ -89,10 +89,47 @@ Claude Code 설정:
 
 ### 환경변수
 
-| 변수 | 설명 |
-|------|------|
-| `SALESFORCE_ACCESS_TOKEN` | SF CLI로 발급한 Access Token |
-| `SALESFORCE_INSTANCE_URL` | Salesforce org URL (예: `https://yourorg.my.salesforce.com`) |
+| 변수 | 필수 | 설명 |
+|------|------|------|
+| `SALESFORCE_ACCESS_TOKEN` | ✅ | SF CLI로 발급한 Access Token |
+| `SALESFORCE_INSTANCE_URL` | ✅ | Salesforce org URL (예: `https://yourorg.my.salesforce.com`) |
+| `SALESFORCE_READONLY` | ➖ | `true`로 설정 시 조회만 가능 (생성·수정·삭제 차단) |
+
+### 권한 모드
+
+#### 🔓 풀 액세스 (기본값)
+조회, 생성, 수정, 삭제 모두 가능합니다.
+
+```bash
+claude mcp add salesforce \
+  -e SALESFORCE_ACCESS_TOKEN=00D2w... \
+  -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com \
+  -- npx -y github:sunny980123/Salesforce-MCP-Server
+```
+
+#### 🔒 읽기 전용 모드 (팀원 공유 추천)
+조회·검색만 가능하며, 생성·수정·삭제 시도 시 오류를 반환합니다.
+
+```bash
+claude mcp add salesforce \
+  -e SALESFORCE_ACCESS_TOKEN=00D2w... \
+  -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com \
+  -e SALESFORCE_READONLY=true \
+  -- npx -y github:sunny980123/Salesforce-MCP-Server
+```
+
+| 도구 | 풀 액세스 | 읽기 전용 |
+|------|:---------:|:---------:|
+| `salesforce_query` | ✅ | ✅ |
+| `salesforce_search` | ✅ | ✅ |
+| `salesforce_get_record` | ✅ | ✅ |
+| `salesforce_describe_object` | ✅ | ✅ |
+| `salesforce_list_objects` | ✅ | ✅ |
+| `salesforce_get_limits` | ✅ | ✅ |
+| `salesforce_tooling_query` | ✅ | ✅ |
+| `salesforce_create_record` | ✅ | ❌ |
+| `salesforce_update_record` | ✅ | ❌ |
+| `salesforce_delete_record` | ✅ | ❌ |
 
 ---
 
