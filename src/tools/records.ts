@@ -9,6 +9,8 @@ const COMMON_OBJECTS = [
   "Contract", "Order", "Quote", "User",
 ] as const;
 
+const isReadOnly = process.env.SALESFORCE_READONLY === "true";
+
 export function registerRecordTools(server: McpServer): void {
   // Get Record
   server.registerTool(
@@ -133,6 +135,9 @@ Examples:
       },
     },
     async ({ object_type, fields }) => {
+      if (isReadOnly) {
+        return { isError: true, content: [{ type: "text", text: "❌ 읽기 전용 모드입니다. 레코드 생성 권한이 없습니다." }] };
+      }
       try {
         const sf = getSalesforceClient();
         const result = await sf.createRecord(object_type, fields as Record<string, unknown>);
@@ -195,6 +200,9 @@ Examples:
       },
     },
     async ({ object_type, record_id, fields }) => {
+      if (isReadOnly) {
+        return { isError: true, content: [{ type: "text", text: "❌ 읽기 전용 모드입니다. 레코드 수정 권한이 없습니다." }] };
+      }
       try {
         const sf = getSalesforceClient();
         await sf.updateRecord(object_type, record_id, fields as Record<string, unknown>);
@@ -248,6 +256,9 @@ Warning: This operation moves the record to the Recycle Bin. It can be restored 
       },
     },
     async ({ object_type, record_id }) => {
+      if (isReadOnly) {
+        return { isError: true, content: [{ type: "text", text: "❌ 읽기 전용 모드입니다. 레코드 삭제 권한이 없습니다." }] };
+      }
       try {
         const sf = getSalesforceClient();
         await sf.deleteRecord(object_type, record_id);

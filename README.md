@@ -2,55 +2,74 @@
 
 Salesforce CRM과 Claude를 연결하는 MCP 서버입니다. 표준 SOQL/SOSL 쿼리, 레코드 CRUD, 오브젝트 메타데이터 탐색, **Tooling API(ValidationRule·Flow·Apex 메타데이터)** 기능을 제공합니다.
 
-## 빠른 시작 (npx — 설치 없이 바로 사용)
+## 팀원 온보딩 (처음 설치하는 경우)
 
-**클론/빌드 필요 없음!** Access Token만 발급하면 바로 사용 가능합니다.
+**클론/빌드 필요 없음!** 아래 순서대로 따라하면 5분 안에 완료됩니다.
 
-### 1단계: Access Token 발급
+### 1단계: SF CLI 설치
 
 ```bash
-# Salesforce CLI 설치 (처음 한 번만)
 brew install sf
-
-# 브라우저 로그인
-sf org login web --instance-url https://[내 org 주소].my.salesforce.com
-
-# Access Token 확인
-sf org display --target-org [내 이메일] --json
 ```
 
-`accessToken` 값과 `instanceUrl` 값을 복사해두세요.
-
-### 2단계: Claude Code 설정
+### 2단계: Salesforce 로그인
 
 ```bash
-claude mcp add salesforce -e SALESFORCE_ACCESS_TOKEN=00D2w... -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com -- npx -y @sunny980123/salesforce-mcp-server
+sf org login web --instance-url https://[회사 org 주소].my.salesforce.com
 ```
 
-또는 `~/.claude/claude_desktop_config.json` 직접 편집:
+→ 브라우저가 열리면 본인 계정으로 로그인
+
+### 3단계: 토큰 확인
+
+```bash
+sf org display --target-org [본인 이메일] --json
+```
+
+결과에서 두 값을 복사해두세요:
 
 ```json
 {
-  "mcpServers": {
-    "salesforce": {
-      "command": "npx",
-      "args": ["-y", "@sunny980123/salesforce-mcp-server"],
-      "env": {
-        "SALESFORCE_ACCESS_TOKEN": "00D2w...",
-        "SALESFORCE_INSTANCE_URL": "https://yourorg.my.salesforce.com"
-      }
-    }
-  }
+  "accessToken": "00D2w...  ← SALESFORCE_ACCESS_TOKEN",
+  "instanceUrl": "https://xxx.my.salesforce.com  ← SALESFORCE_INSTANCE_URL"
 }
 ```
 
-### 3단계: 확인
+### 4단계: MCP 서버 등록
+
+```bash
+claude mcp add salesforce \
+  -e SALESFORCE_ACCESS_TOKEN=여기에붙여넣기 \
+  -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com \
+  -e SALESFORCE_READONLY=true \
+  -- npx -y github:sunny980123/Salesforce-MCP-Server
+```
+
+### 5단계: 확인
 
 ```bash
 claude mcp list
 ```
 
 `salesforce` 서버가 목록에 보이면 완료입니다 🎉
+
+---
+
+## 토큰 만료 시 갱신
+
+```bash
+# 토큰 재발급
+sf org login web --instance-url https://[org 주소].my.salesforce.com
+sf org display --target-org [본인 이메일] --json
+
+# MCP 재등록
+claude mcp remove salesforce
+claude mcp add salesforce \
+  -e SALESFORCE_ACCESS_TOKEN=새토큰 \
+  -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com \
+  -e SALESFORCE_READONLY=true \
+  -- npx -y github:sunny980123/Salesforce-MCP-Server
+```
 
 ---
 
@@ -89,10 +108,47 @@ Claude Code 설정:
 
 ### 환경변수
 
-| 변수 | 설명 |
-|------|------|
-| `SALESFORCE_ACCESS_TOKEN` | SF CLI로 발급한 Access Token |
-| `SALESFORCE_INSTANCE_URL` | Salesforce org URL (예: `https://yourorg.my.salesforce.com`) |
+| 변수 | 필수 | 설명 |
+|------|------|------|
+| `SALESFORCE_ACCESS_TOKEN` | ✅ | SF CLI로 발급한 Access Token |
+| `SALESFORCE_INSTANCE_URL` | ✅ | Salesforce org URL (예: `https://yourorg.my.salesforce.com`) |
+| `SALESFORCE_READONLY` | ➖ | `true`로 설정 시 조회만 가능 (생성·수정·삭제 차단) |
+
+### 권한 모드
+
+#### 🔓 풀 액세스 (기본값)
+조회, 생성, 수정, 삭제 모두 가능합니다.
+
+```bash
+claude mcp add salesforce \
+  -e SALESFORCE_ACCESS_TOKEN=00D2w... \
+  -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com \
+  -- npx -y github:sunny980123/Salesforce-MCP-Server
+```
+
+#### 🔒 읽기 전용 모드 (팀원 공유 추천)
+조회·검색만 가능하며, 생성·수정·삭제 시도 시 오류를 반환합니다.
+
+```bash
+claude mcp add salesforce \
+  -e SALESFORCE_ACCESS_TOKEN=00D2w... \
+  -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com \
+  -e SALESFORCE_READONLY=true \
+  -- npx -y github:sunny980123/Salesforce-MCP-Server
+```
+
+| 도구 | 풀 액세스 | 읽기 전용 |
+|------|:---------:|:---------:|
+| `salesforce_query` | ✅ | ✅ |
+| `salesforce_search` | ✅ | ✅ |
+| `salesforce_get_record` | ✅ | ✅ |
+| `salesforce_describe_object` | ✅ | ✅ |
+| `salesforce_list_objects` | ✅ | ✅ |
+| `salesforce_get_limits` | ✅ | ✅ |
+| `salesforce_tooling_query` | ✅ | ✅ |
+| `salesforce_create_record` | ✅ | ❌ |
+| `salesforce_update_record` | ✅ | ❌ |
+| `salesforce_delete_record` | ✅ | ❌ |
 
 ---
 
@@ -149,18 +205,3 @@ Claude Code 설정:
 
 ---
 
-## 토큰 만료 시 갱신
-
-```bash
-sf org login web --instance-url https://[내 org 주소].my.salesforce.com
-sf org display --target-org [내 이메일] --json
-```
-
-`SALESFORCE_ACCESS_TOKEN` 값을 새 토큰으로 교체 후 Claude 재시작.
-
-**npx 사용 시 빠른 갱신:**
-
-```bash
-claude mcp remove salesforce
-claude mcp add salesforce -e SALESFORCE_ACCESS_TOKEN=새토큰 -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com -- npx -y @sunny980123/salesforce-mcp-server
-```
