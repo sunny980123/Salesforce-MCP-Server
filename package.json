@@ -3,9 +3,9 @@
   "version": "1.1.0",
   "description": "Salesforce MCP Server — Claude와 Salesforce CRM을 연결하는 MCP 서버. 표준 SOQL/SOSL과 Tooling API를 모두 지원합니다.",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/index.cjs",
   "bin": {
-    "salesforce-mcp-server": "dist/index.js"
+    "salesforce-mcp-server": "dist/index.cjs"
   },
   "files": [
     "dist"
@@ -13,7 +13,8 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && npm run bundle",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/bundle.cjs && { echo '#!/usr/bin/env node'; grep -v '^#!' dist/bundle.cjs; } > dist/index.cjs && chmod +x dist/index.cjs && rm dist/bundle.cjs",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
   },
@@ -43,6 +44,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "^0.27.4",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
