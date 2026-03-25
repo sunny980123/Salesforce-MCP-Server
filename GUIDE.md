@@ -104,10 +104,36 @@ Salesforce에서 최근 생성된 리드 5개 보여줘
 
 ---
 
+## 기존 방식(Access Token)에서 업그레이드하는 경우
+
+이전에 `SALESFORCE_ACCESS_TOKEN` 방식으로 설정한 적 있다면 아래 단계로 정리해줘야 합니다.
+
+**1. 기존 설정 제거**
+```bash
+python3 -c "
+import json
+with open('/Users/$(whoami)/.claude.json', 'r') as f:
+    data = json.load(f)
+for key in data.get('projects', {}):
+    if 'salesforce' in data['projects'][key].get('mcpServers', {}):
+        del data['projects'][key]['mcpServers']['salesforce']
+with open('/Users/$(whoami)/.claude.json', 'w') as f:
+    json.dump(data, f, indent=2)
+"
+claude mcp remove salesforce -s user 2>/dev/null; true
+```
+
+**2. 새 방식으로 등록** (Step 3과 동일)
+```bash
+claude mcp add -s user salesforce -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io -e PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin -- node /Users/$(whoami)/Downloads/Salesforce-MCP-Server/dist/index.cjs
+```
+
+---
+
 ## 문제 해결
 
-**"Server disconnected" 오류**
-→ `claude mcp list`로 연결 상태를 확인합니다. salesforce가 없으면 Step 3을 다시 실행합니다.
+**"Failed to connect" 오류**
+→ 기존 설정이 남아있을 수 있습니다. 위 **업그레이드 단계**를 따라주세요.
 
 **"No authorization information found" 오류**
 → Step 2의 로그인이 필요합니다: `sf org login web --instance-url https://channel-b.my.salesforce.com`
