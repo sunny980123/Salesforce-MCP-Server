@@ -27,19 +27,29 @@ registerMetadataTools(server);
 async function main(): Promise<void> {
   const hasTokenAuth =
     process.env.SALESFORCE_ACCESS_TOKEN && process.env.SALESFORCE_INSTANCE_URL;
+  const hasJwtAuth =
+    process.env.SALESFORCE_CLIENT_ID &&
+    process.env.SALESFORCE_USERNAME &&
+    process.env.SALESFORCE_INSTANCE_URL &&
+    process.env.SALESFORCE_PRIVATE_KEY_PATH;
   const hasPasswordAuth =
     process.env.SALESFORCE_CLIENT_ID &&
     process.env.SALESFORCE_CLIENT_SECRET &&
     process.env.SALESFORCE_USERNAME &&
     process.env.SALESFORCE_PASSWORD;
 
-  if (!hasTokenAuth && !hasPasswordAuth) {
+  if (!hasTokenAuth && !hasJwtAuth && !hasPasswordAuth) {
     console.error(
       `ERROR: Missing Salesforce credentials.\n` +
         `\nOption 1 (Access Token):\n` +
         `  SALESFORCE_ACCESS_TOKEN=<token>\n` +
         `  SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com\n` +
-        `\nOption 2 (Username/Password):\n` +
+        `\nOption 2 (JWT Bearer — recommended, auto-refreshes):\n` +
+        `  SALESFORCE_CLIENT_ID=<consumer_key>\n` +
+        `  SALESFORCE_USERNAME=<user@example.com>\n` +
+        `  SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com\n` +
+        `  SALESFORCE_PRIVATE_KEY_PATH=</path/to/private_key.pem>\n` +
+        `\nOption 3 (Username/Password):\n` +
         `  SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET, SALESFORCE_USERNAME, SALESFORCE_PASSWORD`
     );
     process.exit(1);
