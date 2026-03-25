@@ -1,5 +1,6 @@
 import { createSign } from "crypto";
 import { readFileSync } from "fs";
+import { execSync } from "child_process";
 import axios, { AxiosError, AxiosInstance } from "axios";
 import { SF_API_VERSION, SF_LOGIN_URL } from "../constants.js";
 import type {
@@ -19,6 +20,7 @@ interface SalesforceCredentials {
   accessToken?: string;
   instanceUrl?: string;
   privateKeyPath?: string;
+  sfCliUsername?: string;
 }
 
 class SalesforceClient {
@@ -85,7 +87,26 @@ class SalesforceClient {
     console.error("Salesforce JWT token refreshed successfully.");
   }
 
+  private authenticateSfCli(): void {
+    const username = this.credentials.sfCliUsername!;
+    const result = execSync(
+      `sf org display --target-org ${username} --json`,
+      { encoding: "utf-8" }
+    );
+    const data = JSON.parse(result);
+    this.accessToken = data.result.accessToken;
+    this.instanceUrl = data.result.instanceUrl;
+    this.tokenExpiresAt = Date.now() + 55 * 60 * 1000;
+    console.error("Salesforce token refreshed via SF CLI.");
+  }
+
   async authenticate(): Promise<void> {
+    // SF CLI Flow (Option 4)
+    if (this.credentials.sfCliUsername) {
+      this.authenticateSfCli();
+      return;
+    }
+
     // JWT Bearer Flow (preferred)
     if (this.credentials.privateKeyPath) {
       await this.authenticateJwt();
@@ -360,12 +381,16 @@ export function getSalesforceClient(): SalesforceClient {
     const clientId = process.env.SALESFORCE_CLIENT_ID;
     const username = process.env.SALESFORCE_USERNAME;
     const privateKeyPath = process.env.SALESFORCE_PRIVATE_KEY_PATH;
+    const sfCliUsername = process.env.SALESFORCE_SF_CLI_USERNAME;
 
-    if (accessToken && instanceUrl) {
+    if (sfCliUsername) {
+      // Option 4: SF CLI (auto-refreshes via stored refresh token)
+      sfClient = new SalesforceClient({ sfCliUsername });
+    } else if (accessToken && instanceUrl) {
       // Option 1: Static Access Token (manual rotation required)
       sfClient = new SalesforceClient({ accessToken, instanceUrl });
     } else if (clientId && username && privateKeyPath && instanceUrl) {
-      // Option 2: JWT Bearer Flow (recommended — auto-refreshes every hour)
+      // Option 2: JWT Bearer Flow (auto-refreshes every hour)
       sfClient = new SalesforceClient({ clientId, username, privateKeyPath, instanceUrl });
     } else {
       const clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
@@ -374,6 +399,7 @@ export function getSalesforceClient(): SalesforceClient {
       if (!clientId || !clientSecret || !username || !password) {
         throw new Error(
           "Missing required environment variables. Provide one of:\n" +
+          "  Option 4 (SF CLI):         SALESFORCE_SF_CLI_USERNAME=user@example.com\n" +
           "  Option 1 (Static Token):   SALESFORCE_ACCESS_TOKEN + SALESFORCE_INSTANCE_URL\n" +
           "  Option 2 (JWT Bearer):     SALESFORCE_CLIENT_ID + SALESFORCE_USERNAME + SALESFORCE_INSTANCE_URL + SALESFORCE_PRIVATE_KEY_PATH\n" +
           "  Option 3 (Password OAuth): SALESFORCE_CLIENT_ID + SALESFORCE_CLIENT_SECRET + SALESFORCE_USERNAME + SALESFORCE_PASSWORD"

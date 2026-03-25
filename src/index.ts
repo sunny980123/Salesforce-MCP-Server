@@ -25,6 +25,7 @@ registerRecordTools(server);
 registerMetadataTools(server);
 
 async function main(): Promise<void> {
+  const hasSfCliAuth = process.env.SALESFORCE_SF_CLI_USERNAME;
   const hasTokenAuth =
     process.env.SALESFORCE_ACCESS_TOKEN && process.env.SALESFORCE_INSTANCE_URL;
   const hasJwtAuth =
@@ -38,13 +39,15 @@ async function main(): Promise<void> {
     process.env.SALESFORCE_USERNAME &&
     process.env.SALESFORCE_PASSWORD;
 
-  if (!hasTokenAuth && !hasJwtAuth && !hasPasswordAuth) {
+  if (!hasSfCliAuth && !hasTokenAuth && !hasJwtAuth && !hasPasswordAuth) {
     console.error(
       `ERROR: Missing Salesforce credentials.\n` +
+        `\nOption 4 (SF CLI — recommended, auto-refreshes):\n` +
+        `  SALESFORCE_SF_CLI_USERNAME=<user@example.com>\n` +
         `\nOption 1 (Access Token):\n` +
         `  SALESFORCE_ACCESS_TOKEN=<token>\n` +
         `  SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com\n` +
-        `\nOption 2 (JWT Bearer — recommended, auto-refreshes):\n` +
+        `\nOption 2 (JWT Bearer):\n` +
         `  SALESFORCE_CLIENT_ID=<consumer_key>\n` +
         `  SALESFORCE_USERNAME=<user@example.com>\n` +
         `  SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com\n` +
