@@ -53,19 +53,26 @@ sf org login web --instance-url https://channel-b.my.salesforce.com
 
 ---
 
-## Step 3. MCP 서버 등록
-
-아래 명령어에서 `본인이메일@channel.io` 부분을 본인 Salesforce 계정 이메일로 바꿔서 실행합니다.
+## Step 3. 레포 클론 & 빌드
 
 ```bash
-claude mcp add -s user salesforce \
-  -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io \
-  -- npx -y github:sunny980123/Salesforce-MCP-Server
+[ -d ~/Downloads/Salesforce-MCP-Server ] && git -C ~/Downloads/Salesforce-MCP-Server pull || git clone https://github.com/sunny980123/Salesforce-MCP-Server.git ~/Downloads/Salesforce-MCP-Server
+cd ~/Downloads/Salesforce-MCP-Server && npm install && npm run build
 ```
 
 ---
 
-## Step 4. 확인
+## Step 4. MCP 서버 등록
+
+아래 명령어에서 `본인이메일@channel.io` 부분을 본인 Salesforce 계정 이메일로 바꿔서 실행합니다.
+
+```bash
+claude mcp add -s user salesforce -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io -e PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin -e SALESFORCE_NO_DELETE=true -- node ~/Downloads/Salesforce-MCP-Server/dist/index.cjs
+```
+
+---
+
+## Step 5. 확인
 
 ```bash
 claude mcp list
@@ -79,7 +86,7 @@ salesforce: ... - ✓ Connected
 
 ---
 
-## Step 5. 테스트
+## Step 6. 테스트
 
 Claude Code에서 아래 메시지를 입력해봅니다.
 
@@ -123,9 +130,11 @@ with open('/Users/$(whoami)/.claude.json', 'w') as f:
 claude mcp remove salesforce -s user 2>/dev/null; true
 ```
 
-**2. 새 방식으로 등록** (Step 3과 동일)
+**2. 레포 클론 & 빌드 후 새 방식으로 등록** (Step 3~4와 동일)
 ```bash
-claude mcp add -s user salesforce -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io -e PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin -- node /Users/$(whoami)/Downloads/Salesforce-MCP-Server/dist/index.cjs
+[ -d ~/Downloads/Salesforce-MCP-Server ] && git -C ~/Downloads/Salesforce-MCP-Server pull || git clone https://github.com/sunny980123/Salesforce-MCP-Server.git ~/Downloads/Salesforce-MCP-Server
+cd ~/Downloads/Salesforce-MCP-Server && npm install && npm run build
+claude mcp add -s user salesforce -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io -e PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin -e SALESFORCE_NO_DELETE=true -- node ~/Downloads/Salesforce-MCP-Server/dist/index.cjs
 ```
 
 ---
