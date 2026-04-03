@@ -1,8 +1,12 @@
+import { createSign } from "crypto";
+import { readFileSync } from "fs";
+import { execSync } from "child_process";
 import axios, { AxiosError } from "axios";
 import { SF_API_VERSION, SF_LOGIN_URL } from "../constants.js";
 class SalesforceClient {
     accessToken = null;
     instanceUrl = null;
+    tokenExpiresAt = 0;
     client;
     credentials;
     constructor(credentials) {
@@ -12,12 +16,65 @@ class SalesforceClient {
         if (credentials.accessToken && credentials.instanceUrl) {
             this.accessToken = credentials.accessToken;
             this.instanceUrl = credentials.instanceUrl;
+            // Static token: treat as non-expiring (user manages rotation manually)
+            this.tokenExpiresAt = Infinity;
         }
     }
+    async authenticateJwt() {
+        const { clientId, username, privateKeyPath, instanceUrl } = this.credentials;
+        if (!clientId || !username || !privateKeyPath || !instanceUrl) {
+            throw new Error("Missing JWT credentials. Provide SALESFORCE_CLIENT_ID, SALESFORCE_USERNAME, " +
+                "SALESFORCE_INSTANCE_URL, and SALESFORCE_PRIVATE_KEY_PATH.");
+        }
+        const privateKey = readFileSync(privateKeyPath);
+        const now = Math.floor(Date.now() / 1000);
+        const header = Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url");
+        const payload = Buffer.from(JSON.stringify({
+            iss: clientId,
+            sub: username,
+            aud: SF_LOGIN_URL,
+            exp: now + 300,
+        })).toString("base64url");
+        const sign = createSign("RSA-SHA256");
+        sign.update(`${header}.${payload}`);
+        const signature = sign.sign(privateKey, "base64url");
+        const jwt = `${header}.${payload}.${signature}`;
+        const params = new URLSearchParams({
+            grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            assertion: jwt,
+        });
+        const response = await this.client.post(`${SF_LOGIN_URL}/services/oauth2/token`, params.toString(), { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+        this.accessToken = response.data.access_token;
+        this.instanceUrl = response.data.instance_url ?? instanceUrl;
+        // Salesforce JWT access tokens are valid for 1 hour; refresh 5 min early
+        this.tokenExpiresAt = Date.now() + 55 * 60 * 1000;
+        console.error("Salesforce JWT token refreshed successfully.");
+    }
+    authenticateSfCli() {
+        const username = this.credentials.sfCliUsername;
+        const result = execSync(`sf org display --target-org ${username} --json`, { encoding: "utf-8" });
+        const data = JSON.parse(result);
+        this.accessToken = data.result.accessToken;
+        this.instanceUrl = data.result.instanceUrl;
+        this.tokenExpiresAt = Date.now() + 55 * 60 * 1000;
+        console.error("Salesforce token refreshed via SF CLI.");
+    }
     async authenticate() {
+        // SF CLI Flow (Option 4)
+        if (this.credentials.sfCliUsername) {
+            this.authenticateSfCli();
+            return;
+        }
+        // JWT Bearer Flow (preferred)
+        if (this.credentials.privateKeyPath) {
+            await this.authenticateJwt();
+            return;
+        }
+        // Username/Password Flow (fallback)
         if (!this.credentials.clientId || !this.credentials.clientSecret ||
             !this.credentials.username || !this.credentials.password) {
             throw new Error("Missing OAuth credentials. Provide either SALESFORCE_ACCESS_TOKEN + SALESFORCE_INSTANCE_URL, " +
+                "SALESFORCE_CLIENT_ID + SALESFORCE_USERNAME + SALESFORCE_PRIVATE_KEY_PATH (JWT Bearer), " +
                 "or SALESFORCE_CLIENT_ID + SALESFORCE_CLIENT_SECRET + SALESFORCE_USERNAME + SALESFORCE_PASSWORD.");
         }
         const params = new URLSearchParams({
@@ -30,9 +87,11 @@ class SalesforceClient {
         const response = await this.client.post(`${SF_LOGIN_URL}/services/oauth2/token`, params.toString(), { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
         this.accessToken = response.data.access_token;
         this.instanceUrl = response.data.instance_url;
+        this.tokenExpiresAt = Infinity; // Password flow tokens don't have a fixed expiry
     }
     async ensureAuth() {
-        if (!this.accessToken || !this.instanceUrl) {
+        const isExpired = Date.now() >= this.tokenExpiresAt;
+        if (!this.accessToken || !this.instanceUrl || isExpired) {
             await this.authenticate();
         }
     }
@@ -203,19 +262,33 @@ export function getSalesforceClient() {
     if (!sfClient) {
         const accessToken = process.env.SALESFORCE_ACCESS_TOKEN;
         const instanceUrl = process.env.SALESFORCE_INSTANCE_URL;
-        if (accessToken && instanceUrl) {
+        const clientId = process.env.SALESFORCE_CLIENT_ID;
+        const username = process.env.SALESFORCE_USERNAME;
+        const privateKeyPath = process.env.SALESFORCE_PRIVATE_KEY_PATH;
+        const sfCliUsername = process.env.SALESFORCE_SF_CLI_USERNAME;
+        if (sfCliUsername) {
+            // Option 4: SF CLI (auto-refreshes via stored refresh token)
+            sfClient = new SalesforceClient({ sfCliUsername });
+        }
+        else if (accessToken && instanceUrl) {
+            // Option 1: Static Access Token (manual rotation required)
             sfClient = new SalesforceClient({ accessToken, instanceUrl });
         }
+        else if (clientId && username && privateKeyPath && instanceUrl) {
+            // Option 2: JWT Bearer Flow (auto-refreshes every hour)
+            sfClient = new SalesforceClient({ clientId, username, privateKeyPath, instanceUrl });
+        }
         else {
-            const clientId = process.env.SALESFORCE_CLIENT_ID;
             const clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
-            const username = process.env.SALESFORCE_USERNAME;
             const password = process.env.SALESFORCE_PASSWORD;
             if (!clientId || !clientSecret || !username || !password) {
-                throw new Error("Missing required environment variables. Provide either:\n" +
-                    "  Option 1: SALESFORCE_ACCESS_TOKEN + SALESFORCE_INSTANCE_URL\n" +
-                    "  Option 2: SALESFORCE_CLIENT_ID + SALESFORCE_CLIENT_SECRET + SALESFORCE_USERNAME + SALESFORCE_PASSWORD");
+                throw new Error("Missing required environment variables. Provide one of:\n" +
+                    "  Option 4 (SF CLI):         SALESFORCE_SF_CLI_USERNAME=user@example.com\n" +
+                    "  Option 1 (Static Token):   SALESFORCE_ACCESS_TOKEN + SALESFORCE_INSTANCE_URL\n" +
+                    "  Option 2 (JWT Bearer):     SALESFORCE_CLIENT_ID + SALESFORCE_USERNAME + SALESFORCE_INSTANCE_URL + SALESFORCE_PRIVATE_KEY_PATH\n" +
+                    "  Option 3 (Password OAuth): SALESFORCE_CLIENT_ID + SALESFORCE_CLIENT_SECRET + SALESFORCE_USERNAME + SALESFORCE_PASSWORD");
             }
+            // Option 3: Username/Password OAuth Flow
             sfClient = new SalesforceClient({ clientId, clientSecret, username, password });
         }
     }

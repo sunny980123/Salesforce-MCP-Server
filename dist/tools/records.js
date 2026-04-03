@@ -7,6 +7,7 @@ const COMMON_OBJECTS = [
     "Contract", "Order", "Quote", "User",
 ];
 const isReadOnly = process.env.SALESFORCE_READONLY === "true";
+const isDeleteDisabled = process.env.SALESFORCE_NO_DELETE === "true" || isReadOnly;
 export function registerRecordTools(server) {
     // Get Record
     server.registerTool("salesforce_get_record", {
@@ -234,8 +235,8 @@ Warning: This operation moves the record to the Recycle Bin. It can be restored 
             openWorldHint: true,
         },
     }, async ({ object_type, record_id }) => {
-        if (isReadOnly) {
-            return { isError: true, content: [{ type: "text", text: "❌ 읽기 전용 모드입니다. 레코드 삭제 권한이 없습니다." }] };
+        if (isDeleteDisabled) {
+            return { isError: true, content: [{ type: "text", text: "❌ 레코드 삭제 권한이 없습니다." }] };
         }
         try {
             const sf = getSalesforceClient();

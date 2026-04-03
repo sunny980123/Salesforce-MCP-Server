@@ -6,13 +6,18 @@ interface SalesforceCredentials {
     password?: string;
     accessToken?: string;
     instanceUrl?: string;
+    privateKeyPath?: string;
+    sfCliUsername?: string;
 }
 declare class SalesforceClient {
     private accessToken;
     private instanceUrl;
+    private tokenExpiresAt;
     private client;
     private credentials;
     constructor(credentials: SalesforceCredentials);
+    private authenticateJwt;
+    private authenticateSfCli;
     authenticate(): Promise<void>;
     private ensureAuth;
     private authHeaders;

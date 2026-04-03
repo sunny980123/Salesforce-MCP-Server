@@ -206,44 +206,20 @@ Returns:
 
   // Tooling API SOQL Query
   server.registerTool(
-    "salesforce_tooling_query",
+    "salesforce_metadata_query",
     {
-      title: "Salesforce Tooling API Query",
-      description: `Execute a SOQL query using the Salesforce Tooling API to access metadata and configuration objects not available via standard SOQL.
+      title: "Salesforce Metadata Query",
+      description: `Execute a SOQL query using the Salesforce Tooling API to access metadata objects not available via standard SOQL.
 
-Use this tool when you need to inspect:
-- ValidationRule (validation rule formulas and conditions)
-- Flow / FlowVersionView (flow logic and metadata)
-- ApexClass / ApexTrigger (Apex code body)
-- WorkflowRule, ProcessDefinition
-- FieldDefinition, EntityDefinition
-- Other Tooling API-only objects
+Use for: ValidationRule, Flow/FlowVersionView, ApexClass/ApexTrigger, WorkflowRule, FieldDefinition.
 
-Key differences from standard salesforce_query:
-- Accesses /tooling/query endpoint instead of /query
-- Required for Metadata field (e.g., Flow.Metadata, ValidationRule.Metadata)
-- Can only return ONE record at a time when querying Metadata or FullName fields
-- Supports objects like ValidationRule, Flow, ApexClass that are not in standard SOQL
+Examples:
+- SELECT Id, ValidationName, Active, EntityDefinitionId FROM ValidationRule
+- SELECT Id, MasterLabel, Status, VersionNumber FROM Flow WHERE Status = 'Active'
+- SELECT Id, MasterLabel, Metadata FROM Flow WHERE Id = '301xx...'
+- SELECT Id, Name, Body FROM ApexClass WHERE Name = 'MyClass'
 
-Common use cases:
-- Find which ValidationRules reference a specific field:
-  SELECT Id, ValidationName, Active, EntityDefinitionId FROM ValidationRule
-- Get full flow logic for a specific flow version:
-  SELECT Id, MasterLabel, Metadata FROM Flow WHERE Id = '301xx...'
-- Check Apex code for field references:
-  SELECT Id, Name, Body FROM ApexClass WHERE Name = 'MyClass'
-- List all active flows on an object:
-  SELECT Id, MasterLabel, Status, VersionNumber FROM Flow WHERE Status = 'Active'
-
-Args:
-  - soql (string): A valid SOQL query string targeting Tooling API objects
-  - limit (number): Max records to return (default: 20, max: 200)
-  - response_format ('markdown' | 'json'): Output format (default: 'markdown')
-
-Important notes:
-- Queries with Metadata or FullName fields must return exactly 1 row
-- Use WHERE Id = '...' to fetch a specific record with Metadata
-- Flow object uses MasterLabel (not ApiName), DeveloperName is on FlowDefinition`,
+Note: Queries with Metadata or FullName fields must return exactly 1 row (use WHERE Id = '...')`,
       inputSchema: z.object({
         soql: z
           .string()

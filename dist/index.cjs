@@ -32499,6 +32499,11 @@ var ResponseFormat = /* @__PURE__ */ ((ResponseFormat2) => {
   return ResponseFormat2;
 })(ResponseFormat || {});
 
+// src/services/salesforce.ts
+var import_crypto2 = require("crypto");
+var import_fs = require("fs");
+var import_child_process = require("child_process");
+
 // node_modules/axios/lib/helpers/bind.js
 function bind(fn, thisArg) {
   return function wrap() {
@@ -36280,6 +36285,7 @@ var {
 var SalesforceClient = class {
   accessToken = null;
   instanceUrl = null;
+  tokenExpiresAt = 0;
   client;
   credentials;
   constructor(credentials) {
@@ -36288,12 +36294,69 @@ var SalesforceClient = class {
     if (credentials.accessToken && credentials.instanceUrl) {
       this.accessToken = credentials.accessToken;
       this.instanceUrl = credentials.instanceUrl;
+      this.tokenExpiresAt = Infinity;
     }
   }
+  async authenticateJwt() {
+    const { clientId, username, privateKeyPath, instanceUrl } = this.credentials;
+    if (!clientId || !username || !privateKeyPath || !instanceUrl) {
+      throw new Error(
+        "Missing JWT credentials. Provide SALESFORCE_CLIENT_ID, SALESFORCE_USERNAME, SALESFORCE_INSTANCE_URL, and SALESFORCE_PRIVATE_KEY_PATH."
+      );
+    }
+    const privateKey = (0, import_fs.readFileSync)(privateKeyPath);
+    const now = Math.floor(Date.now() / 1e3);
+    const header = Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url");
+    const payload = Buffer.from(
+      JSON.stringify({
+        iss: clientId,
+        sub: username,
+        aud: SF_LOGIN_URL,
+        exp: now + 300
+      })
+    ).toString("base64url");
+    const sign = (0, import_crypto2.createSign)("RSA-SHA256");
+    sign.update(`${header}.${payload}`);
+    const signature = sign.sign(privateKey, "base64url");
+    const jwt = `${header}.${payload}.${signature}`;
+    const params = new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt
+    });
+    const response = await this.client.post(
+      `${SF_LOGIN_URL}/services/oauth2/token`,
+      params.toString(),
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+    );
+    this.accessToken = response.data.access_token;
+    this.instanceUrl = response.data.instance_url ?? instanceUrl;
+    this.tokenExpiresAt = Date.now() + 55 * 60 * 1e3;
+    console.error("Salesforce JWT token refreshed successfully.");
+  }
+  authenticateSfCli() {
+    const username = this.credentials.sfCliUsername;
+    const result = (0, import_child_process.execSync)(
+      `sf org display --target-org ${username} --json`,
+      { encoding: "utf-8" }
+    );
+    const data = JSON.parse(result);
+    this.accessToken = data.result.accessToken;
+    this.instanceUrl = data.result.instanceUrl;
+    this.tokenExpiresAt = Date.now() + 55 * 60 * 1e3;
+    console.error("Salesforce token refreshed via SF CLI.");
+  }
   async authenticate() {
+    if (this.credentials.sfCliUsername) {
+      this.authenticateSfCli();
+      return;
+    }
+    if (this.credentials.privateKeyPath) {
+      await this.authenticateJwt();
+      return;
+    }
     if (!this.credentials.clientId || !this.credentials.clientSecret || !this.credentials.username || !this.credentials.password) {
       throw new Error(
-        "Missing OAuth credentials. Provide either SALESFORCE_ACCESS_TOKEN + SALESFORCE_INSTANCE_URL, or SALESFORCE_CLIENT_ID + SALESFORCE_CLIENT_SECRET + SALESFORCE_USERNAME + SALESFORCE_PASSWORD."
+        "Missing OAuth credentials. Provide either SALESFORCE_ACCESS_TOKEN + SALESFORCE_INSTANCE_URL, SALESFORCE_CLIENT_ID + SALESFORCE_USERNAME + SALESFORCE_PRIVATE_KEY_PATH (JWT Bearer), or SALESFORCE_CLIENT_ID + SALESFORCE_CLIENT_SECRET + SALESFORCE_USERNAME + SALESFORCE_PASSWORD."
       );
     }
     const params = new URLSearchParams({
@@ -36310,9 +36373,11 @@ var SalesforceClient = class {
     );
     this.accessToken = response.data.access_token;
     this.instanceUrl = response.data.instance_url;
+    this.tokenExpiresAt = Infinity;
   }
   async ensureAuth() {
-    if (!this.accessToken || !this.instanceUrl) {
+    const isExpired = Date.now() >= this.tokenExpiresAt;
+    if (!this.accessToken || !this.instanceUrl || isExpired) {
       await this.authenticate();
     }
   }
@@ -36507,16 +36572,22 @@ function getSalesforceClient() {
   if (!sfClient) {
     const accessToken = process.env.SALESFORCE_ACCESS_TOKEN;
     const instanceUrl = process.env.SALESFORCE_INSTANCE_URL;
-    if (accessToken && instanceUrl) {
+    const clientId = process.env.SALESFORCE_CLIENT_ID;
+    const username = process.env.SALESFORCE_USERNAME;
+    const privateKeyPath = process.env.SALESFORCE_PRIVATE_KEY_PATH;
+    const sfCliUsername = process.env.SALESFORCE_SF_CLI_USERNAME;
+    if (sfCliUsername) {
+      sfClient = new SalesforceClient({ sfCliUsername });
+    } else if (accessToken && instanceUrl) {
       sfClient = new SalesforceClient({ accessToken, instanceUrl });
+    } else if (clientId && username && privateKeyPath && instanceUrl) {
+      sfClient = new SalesforceClient({ clientId, username, privateKeyPath, instanceUrl });
     } else {
-      const clientId = process.env.SALESFORCE_CLIENT_ID;
       const clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
-      const username = process.env.SALESFORCE_USERNAME;
       const password = process.env.SALESFORCE_PASSWORD;
       if (!clientId || !clientSecret || !username || !password) {
         throw new Error(
-          "Missing required environment variables. Provide either:\n  Option 1: SALESFORCE_ACCESS_TOKEN + SALESFORCE_INSTANCE_URL\n  Option 2: SALESFORCE_CLIENT_ID + SALESFORCE_CLIENT_SECRET + SALESFORCE_USERNAME + SALESFORCE_PASSWORD"
+          "Missing required environment variables. Provide one of:\n  Option 4 (SF CLI):         SALESFORCE_SF_CLI_USERNAME=user@example.com\n  Option 1 (Static Token):   SALESFORCE_ACCESS_TOKEN + SALESFORCE_INSTANCE_URL\n  Option 2 (JWT Bearer):     SALESFORCE_CLIENT_ID + SALESFORCE_USERNAME + SALESFORCE_INSTANCE_URL + SALESFORCE_PRIVATE_KEY_PATH\n  Option 3 (Password OAuth): SALESFORCE_CLIENT_ID + SALESFORCE_CLIENT_SECRET + SALESFORCE_USERNAME + SALESFORCE_PASSWORD"
         );
       }
       sfClient = new SalesforceClient({ clientId, clientSecret, username, password });
@@ -36689,44 +36760,20 @@ Returns:
     }
   );
   server2.registerTool(
-    "salesforce_tooling_query",
+    "salesforce_metadata_query",
     {
-      title: "Salesforce Tooling API Query",
-      description: `Execute a SOQL query using the Salesforce Tooling API to access metadata and configuration objects not available via standard SOQL.
+      title: "Salesforce Metadata Query",
+      description: `Execute a SOQL query using the Salesforce Tooling API to access metadata objects not available via standard SOQL.
 
-Use this tool when you need to inspect:
-- ValidationRule (validation rule formulas and conditions)
-- Flow / FlowVersionView (flow logic and metadata)
-- ApexClass / ApexTrigger (Apex code body)
-- WorkflowRule, ProcessDefinition
-- FieldDefinition, EntityDefinition
-- Other Tooling API-only objects
+Use for: ValidationRule, Flow/FlowVersionView, ApexClass/ApexTrigger, WorkflowRule, FieldDefinition.
 
-Key differences from standard salesforce_query:
-- Accesses /tooling/query endpoint instead of /query
-- Required for Metadata field (e.g., Flow.Metadata, ValidationRule.Metadata)
-- Can only return ONE record at a time when querying Metadata or FullName fields
-- Supports objects like ValidationRule, Flow, ApexClass that are not in standard SOQL
+Examples:
+- SELECT Id, ValidationName, Active, EntityDefinitionId FROM ValidationRule
+- SELECT Id, MasterLabel, Status, VersionNumber FROM Flow WHERE Status = 'Active'
+- SELECT Id, MasterLabel, Metadata FROM Flow WHERE Id = '301xx...'
+- SELECT Id, Name, Body FROM ApexClass WHERE Name = 'MyClass'
 
-Common use cases:
-- Find which ValidationRules reference a specific field:
-  SELECT Id, ValidationName, Active, EntityDefinitionId FROM ValidationRule
-- Get full flow logic for a specific flow version:
-  SELECT Id, MasterLabel, Metadata FROM Flow WHERE Id = '301xx...'
-- Check Apex code for field references:
-  SELECT Id, Name, Body FROM ApexClass WHERE Name = 'MyClass'
-- List all active flows on an object:
-  SELECT Id, MasterLabel, Status, VersionNumber FROM Flow WHERE Status = 'Active'
-
-Args:
-  - soql (string): A valid SOQL query string targeting Tooling API objects
-  - limit (number): Max records to return (default: 20, max: 200)
-  - response_format ('markdown' | 'json'): Output format (default: 'markdown')
-
-Important notes:
-- Queries with Metadata or FullName fields must return exactly 1 row
-- Use WHERE Id = '...' to fetch a specific record with Metadata
-- Flow object uses MasterLabel (not ApiName), DeveloperName is on FlowDefinition`,
+Note: Queries with Metadata or FullName fields must return exactly 1 row (use WHERE Id = '...')`,
       inputSchema: external_exports.object({
         soql: external_exports.string().min(10, "SOQL query must be at least 10 characters").describe("SOQL query string targeting Tooling API objects (e.g., SELECT Id, ValidationName FROM ValidationRule)"),
         limit: external_exports.number().int().min(1).max(200).default(20).describe("Maximum number of records to return (default: 20)"),
@@ -36807,6 +36854,7 @@ var COMMON_OBJECTS = [
   "User"
 ];
 var isReadOnly = process.env.SALESFORCE_READONLY === "true";
+var isDeleteDisabled = process.env.SALESFORCE_NO_DELETE === "true" || isReadOnly;
 function registerRecordTools(server2) {
   server2.registerTool(
     "salesforce_get_record",
@@ -37010,8 +37058,8 @@ Warning: This operation moves the record to the Recycle Bin. It can be restored 
       }
     },
     async ({ object_type, record_id }) => {
-      if (isReadOnly) {
-        return { isError: true, content: [{ type: "text", text: "\u274C \uC77D\uAE30 \uC804\uC6A9 \uBAA8\uB4DC\uC785\uB2C8\uB2E4. \uB808\uCF54\uB4DC \uC0AD\uC81C \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }] };
+      if (isDeleteDisabled) {
+        return { isError: true, content: [{ type: "text", text: "\u274C \uB808\uCF54\uB4DC \uC0AD\uC81C \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }] };
       }
       try {
         const sf = getSalesforceClient();
@@ -37295,17 +37343,28 @@ registerQueryTools(server);
 registerRecordTools(server);
 registerMetadataTools(server);
 async function main() {
+  const hasSfCliAuth = process.env.SALESFORCE_SF_CLI_USERNAME;
   const hasTokenAuth = process.env.SALESFORCE_ACCESS_TOKEN && process.env.SALESFORCE_INSTANCE_URL;
+  const hasJwtAuth = process.env.SALESFORCE_CLIENT_ID && process.env.SALESFORCE_USERNAME && process.env.SALESFORCE_INSTANCE_URL && process.env.SALESFORCE_PRIVATE_KEY_PATH;
   const hasPasswordAuth = process.env.SALESFORCE_CLIENT_ID && process.env.SALESFORCE_CLIENT_SECRET && process.env.SALESFORCE_USERNAME && process.env.SALESFORCE_PASSWORD;
-  if (!hasTokenAuth && !hasPasswordAuth) {
+  if (!hasSfCliAuth && !hasTokenAuth && !hasJwtAuth && !hasPasswordAuth) {
     console.error(
       `ERROR: Missing Salesforce credentials.
+
+Option 4 (SF CLI \u2014 recommended, auto-refreshes):
+  SALESFORCE_SF_CLI_USERNAME=<user@example.com>
 
 Option 1 (Access Token):
   SALESFORCE_ACCESS_TOKEN=<token>
   SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com
 
-Option 2 (Username/Password):
+Option 2 (JWT Bearer):
+  SALESFORCE_CLIENT_ID=<consumer_key>
+  SALESFORCE_USERNAME=<user@example.com>
+  SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com
+  SALESFORCE_PRIVATE_KEY_PATH=</path/to/private_key.pem>
+
+Option 3 (Username/Password):
   SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET, SALESFORCE_USERNAME, SALESFORCE_PASSWORD`
     );
     process.exit(1);
