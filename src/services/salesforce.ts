@@ -42,6 +42,47 @@ class SalesforceClient {
     }
   }
 
+  /**
+   * Invalidate the cached token so the next ensureAuth() call
+   * will trigger a fresh authentication.
+   */
+  invalidateToken(): void {
+    this.accessToken = null;
+    this.tokenExpiresAt = 0;
+    console.error("Salesforce token invalidated; will re-authenticate on next call.");
+  }
+
+  /**
+   * Wrapper that executes an API call and, on auth-related errors
+   * (401 or 400 with session/auth messages), invalidates the token,
+   * re-authenticates, and retries once.
+   */
+  private async withAuthRetry<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof AxiosError && error.response) {
+        const status = error.response.status;
+        const body = error.response.data;
+        const msg = Array.isArray(body) && body[0]?.message
+          ? body[0].message
+          : typeof body === "string" ? body : JSON.stringify(body);
+        const isAuthError =
+          status === 401 ||
+          (status === 400 && /session|auth|token|expired|invalid/i.test(msg));
+
+        if (isAuthError) {
+          console.error(`Auth-related ${status} error detected, re-authenticating...`);
+          this.invalidateToken();
+          await this.ensureAuth();
+          // Retry once after re-authentication
+          return await fn();
+        }
+      }
+      throw error;
+    }
+  }
+
   private async authenticateJwt(): Promise<void> {
     const { clientId, username, privateKeyPath, instanceUrl } = this.credentials;
     if (!clientId || !username || !privateKeyPath || !instanceUrl) {
@@ -89,15 +130,34 @@ class SalesforceClient {
 
   private authenticateSfCli(): void {
     const username = this.credentials.sfCliUsername!;
-    const result = execSync(
-      `sf org display --target-org ${username} --json`,
-      { encoding: "utf-8" }
-    );
-    const data = JSON.parse(result);
-    this.accessToken = data.result.accessToken;
-    this.instanceUrl = data.result.instanceUrl;
-    this.tokenExpiresAt = Date.now() + 55 * 60 * 1000;
-    console.error("Salesforce token refreshed via SF CLI.");
+    try {
+      const result = execSync(
+        `sf org display --target-org ${username} --json`,
+        { encoding: "utf-8" }
+      );
+      const data = JSON.parse(result);
+
+      if (!data.result?.accessToken || !data.result?.instanceUrl) {
+        throw new Error(
+          `SF CLI returned incomplete data for ${username}. ` +
+          `accessToken: ${!!data.result?.accessToken}, instanceUrl: ${!!data.result?.instanceUrl}. ` +
+          "Run 'sf org login web --instance-url <url>' to re-authenticate."
+        );
+      }
+
+      this.accessToken = data.result.accessToken;
+      this.instanceUrl = data.result.instanceUrl;
+      this.tokenExpiresAt = Date.now() + 55 * 60 * 1000;
+      console.error("Salesforce token refreshed via SF CLI.");
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("SF CLI returned")) {
+        throw error; // Re-throw our own validation error
+      }
+      throw new Error(
+        `SF CLI authentication failed for ${username}: ${error instanceof Error ? error.message : String(error)}. ` +
+        "Ensure 'sf' CLI is installed, on PATH, and the org is authorized."
+      );
+    }
   }
 
   async authenticate(): Promise<void> {
@@ -164,14 +224,16 @@ class SalesforceClient {
   async query<T = SalesforceRecord>(soql: string): Promise<QueryResult<T>> {
     await this.ensureAuth();
     try {
-      const response = await this.client.get<QueryResult<T>>(
-        `${this.baseUrl()}/query`,
-        {
-          params: { q: soql },
-          headers: this.authHeaders(),
-        }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get<QueryResult<T>>(
+          `${this.baseUrl()}/query`,
+          {
+            params: { q: soql },
+            headers: this.authHeaders(),
+          }
+        );
+        return response.data;
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -182,11 +244,13 @@ class SalesforceClient {
   ): Promise<QueryResult<T>> {
     await this.ensureAuth();
     try {
-      const response = await this.client.get<QueryResult<T>>(
-        `${this.instanceUrl}${nextUrl}`,
-        { headers: this.authHeaders() }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get<QueryResult<T>>(
+          `${this.instanceUrl}${nextUrl}`,
+          { headers: this.authHeaders() }
+        );
+        return response.data;
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -195,13 +259,15 @@ class SalesforceClient {
   async search(sosl: string): Promise<{ searchRecords: SalesforceRecord[] }> {
     await this.ensureAuth();
     try {
-      const response = await this.client.get<{
-        searchRecords: SalesforceRecord[];
-      }>(`${this.baseUrl()}/search`, {
-        params: { q: sosl },
-        headers: this.authHeaders(),
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get<{
+          searchRecords: SalesforceRecord[];
+        }>(`${this.baseUrl()}/search`, {
+          params: { q: sosl },
+          headers: this.authHeaders(),
+        });
+        return response.data;
       });
-      return response.data;
     } catch (error) {
       throw wrapError(error);
     }
@@ -214,15 +280,17 @@ class SalesforceClient {
   ): Promise<SalesforceRecord> {
     await this.ensureAuth();
     try {
-      const params: Record<string, string> = {};
-      if (fields?.length) {
-        params.fields = fields.join(",");
-      }
-      const response = await this.client.get<SalesforceRecord>(
-        `${this.baseUrl()}/sobjects/${objectType}/${id}`,
-        { params, headers: this.authHeaders() }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const params: Record<string, string> = {};
+        if (fields?.length) {
+          params.fields = fields.join(",");
+        }
+        const response = await this.client.get<SalesforceRecord>(
+          `${this.baseUrl()}/sobjects/${objectType}/${id}`,
+          { params, headers: this.authHeaders() }
+        );
+        return response.data;
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -234,12 +302,14 @@ class SalesforceClient {
   ): Promise<SaveResult> {
     await this.ensureAuth();
     try {
-      const response = await this.client.post<SaveResult>(
-        `${this.baseUrl()}/sobjects/${objectType}`,
-        data,
-        { headers: this.authHeaders() }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.post<SaveResult>(
+          `${this.baseUrl()}/sobjects/${objectType}`,
+          data,
+          { headers: this.authHeaders() }
+        );
+        return response.data;
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -252,11 +322,13 @@ class SalesforceClient {
   ): Promise<void> {
     await this.ensureAuth();
     try {
-      await this.client.patch(
-        `${this.baseUrl()}/sobjects/${objectType}/${id}`,
-        data,
-        { headers: this.authHeaders() }
-      );
+      await this.withAuthRetry(async () => {
+        await this.client.patch(
+          `${this.baseUrl()}/sobjects/${objectType}/${id}`,
+          data,
+          { headers: this.authHeaders() }
+        );
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -265,10 +337,12 @@ class SalesforceClient {
   async deleteRecord(objectType: string, id: string): Promise<void> {
     await this.ensureAuth();
     try {
-      await this.client.delete(
-        `${this.baseUrl()}/sobjects/${objectType}/${id}`,
-        { headers: this.authHeaders() }
-      );
+      await this.withAuthRetry(async () => {
+        await this.client.delete(
+          `${this.baseUrl()}/sobjects/${objectType}/${id}`,
+          { headers: this.authHeaders() }
+        );
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -277,11 +351,13 @@ class SalesforceClient {
   async describeObject(objectType: string): Promise<ObjectDescribe> {
     await this.ensureAuth();
     try {
-      const response = await this.client.get<ObjectDescribe>(
-        `${this.baseUrl()}/sobjects/${objectType}/describe`,
-        { headers: this.authHeaders() }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get<ObjectDescribe>(
+          `${this.baseUrl()}/sobjects/${objectType}/describe`,
+          { headers: this.authHeaders() }
+        );
+        return response.data;
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -290,11 +366,13 @@ class SalesforceClient {
   async listObjects(): Promise<SObjectInfo[]> {
     await this.ensureAuth();
     try {
-      const response = await this.client.get<{ sobjects: SObjectInfo[] }>(
-        `${this.baseUrl()}/sobjects`,
-        { headers: this.authHeaders() }
-      );
-      return response.data.sobjects;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get<{ sobjects: SObjectInfo[] }>(
+          `${this.baseUrl()}/sobjects`,
+          { headers: this.authHeaders() }
+        );
+        return response.data.sobjects;
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -303,10 +381,12 @@ class SalesforceClient {
   async getLimits(): Promise<Record<string, { Max: number; Remaining: number }>> {
     await this.ensureAuth();
     try {
-      const response = await this.client.get<
-        Record<string, { Max: number; Remaining: number }>
-      >(`${this.baseUrl()}/limits`, { headers: this.authHeaders() });
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get<
+          Record<string, { Max: number; Remaining: number }>
+        >(`${this.baseUrl()}/limits`, { headers: this.authHeaders() });
+        return response.data;
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -319,14 +399,16 @@ class SalesforceClient {
   async toolingQuery<T = SalesforceRecord>(soql: string): Promise<QueryResult<T>> {
     await this.ensureAuth();
     try {
-      const response = await this.client.get<QueryResult<T>>(
-        `${this.toolingBaseUrl()}/query`,
-        {
-          params: { q: soql },
-          headers: this.authHeaders(),
-        }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get<QueryResult<T>>(
+          `${this.toolingBaseUrl()}/query`,
+          {
+            params: { q: soql },
+            headers: this.authHeaders(),
+          }
+        );
+        return response.data;
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -373,6 +455,15 @@ function wrapError(error: unknown): Error {
 
 // Singleton client instance
 let sfClient: SalesforceClient | null = null;
+
+/**
+ * Reset the singleton client, forcing a fresh instance and re-authentication
+ * on the next getSalesforceClient() call.
+ */
+export function resetSalesforceClient(): void {
+  sfClient = null;
+  console.error("Salesforce client singleton has been reset.");
+}
 
 export function getSalesforceClient(): SalesforceClient {
   if (!sfClient) {

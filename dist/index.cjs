@@ -36297,6 +36297,39 @@ var SalesforceClient = class {
       this.tokenExpiresAt = Infinity;
     }
   }
+  /**
+   * Invalidate the cached token so the next ensureAuth() call
+   * will trigger a fresh authentication.
+   */
+  invalidateToken() {
+    this.accessToken = null;
+    this.tokenExpiresAt = 0;
+    console.error("Salesforce token invalidated; will re-authenticate on next call.");
+  }
+  /**
+   * Wrapper that executes an API call and, on auth-related errors
+   * (401 or 400 with session/auth messages), invalidates the token,
+   * re-authenticates, and retries once.
+   */
+  async withAuthRetry(fn) {
+    try {
+      return await fn();
+    } catch (error2) {
+      if (error2 instanceof AxiosError2 && error2.response) {
+        const status = error2.response.status;
+        const body = error2.response.data;
+        const msg = Array.isArray(body) && body[0]?.message ? body[0].message : typeof body === "string" ? body : JSON.stringify(body);
+        const isAuthError = status === 401 || status === 400 && /session|auth|token|expired|invalid/i.test(msg);
+        if (isAuthError) {
+          console.error(`Auth-related ${status} error detected, re-authenticating...`);
+          this.invalidateToken();
+          await this.ensureAuth();
+          return await fn();
+        }
+      }
+      throw error2;
+    }
+  }
   async authenticateJwt() {
     const { clientId, username, privateKeyPath, instanceUrl } = this.credentials;
     if (!clientId || !username || !privateKeyPath || !instanceUrl) {
@@ -36335,15 +36368,29 @@ var SalesforceClient = class {
   }
   authenticateSfCli() {
     const username = this.credentials.sfCliUsername;
-    const result = (0, import_child_process.execSync)(
-      `sf org display --target-org ${username} --json`,
-      { encoding: "utf-8" }
-    );
-    const data = JSON.parse(result);
-    this.accessToken = data.result.accessToken;
-    this.instanceUrl = data.result.instanceUrl;
-    this.tokenExpiresAt = Date.now() + 55 * 60 * 1e3;
-    console.error("Salesforce token refreshed via SF CLI.");
+    try {
+      const result = (0, import_child_process.execSync)(
+        `sf org display --target-org ${username} --json`,
+        { encoding: "utf-8" }
+      );
+      const data = JSON.parse(result);
+      if (!data.result?.accessToken || !data.result?.instanceUrl) {
+        throw new Error(
+          `SF CLI returned incomplete data for ${username}. accessToken: ${!!data.result?.accessToken}, instanceUrl: ${!!data.result?.instanceUrl}. Run 'sf org login web --instance-url <url>' to re-authenticate.`
+        );
+      }
+      this.accessToken = data.result.accessToken;
+      this.instanceUrl = data.result.instanceUrl;
+      this.tokenExpiresAt = Date.now() + 55 * 60 * 1e3;
+      console.error("Salesforce token refreshed via SF CLI.");
+    } catch (error2) {
+      if (error2 instanceof Error && error2.message.includes("SF CLI returned")) {
+        throw error2;
+      }
+      throw new Error(
+        `SF CLI authentication failed for ${username}: ${error2 instanceof Error ? error2.message : String(error2)}. Ensure 'sf' CLI is installed, on PATH, and the org is authorized.`
+      );
+    }
   }
   async authenticate() {
     if (this.credentials.sfCliUsername) {
@@ -36394,14 +36441,16 @@ var SalesforceClient = class {
   async query(soql) {
     await this.ensureAuth();
     try {
-      const response = await this.client.get(
-        `${this.baseUrl()}/query`,
-        {
-          params: { q: soql },
-          headers: this.authHeaders()
-        }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get(
+          `${this.baseUrl()}/query`,
+          {
+            params: { q: soql },
+            headers: this.authHeaders()
+          }
+        );
+        return response.data;
+      });
     } catch (error2) {
       throw wrapError(error2);
     }
@@ -36409,11 +36458,13 @@ var SalesforceClient = class {
   async queryMore(nextUrl) {
     await this.ensureAuth();
     try {
-      const response = await this.client.get(
-        `${this.instanceUrl}${nextUrl}`,
-        { headers: this.authHeaders() }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get(
+          `${this.instanceUrl}${nextUrl}`,
+          { headers: this.authHeaders() }
+        );
+        return response.data;
+      });
     } catch (error2) {
       throw wrapError(error2);
     }
@@ -36421,11 +36472,13 @@ var SalesforceClient = class {
   async search(sosl) {
     await this.ensureAuth();
     try {
-      const response = await this.client.get(`${this.baseUrl()}/search`, {
-        params: { q: sosl },
-        headers: this.authHeaders()
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get(`${this.baseUrl()}/search`, {
+          params: { q: sosl },
+          headers: this.authHeaders()
+        });
+        return response.data;
       });
-      return response.data;
     } catch (error2) {
       throw wrapError(error2);
     }
@@ -36433,15 +36486,17 @@ var SalesforceClient = class {
   async getRecord(objectType2, id, fields) {
     await this.ensureAuth();
     try {
-      const params = {};
-      if (fields?.length) {
-        params.fields = fields.join(",");
-      }
-      const response = await this.client.get(
-        `${this.baseUrl()}/sobjects/${objectType2}/${id}`,
-        { params, headers: this.authHeaders() }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const params = {};
+        if (fields?.length) {
+          params.fields = fields.join(",");
+        }
+        const response = await this.client.get(
+          `${this.baseUrl()}/sobjects/${objectType2}/${id}`,
+          { params, headers: this.authHeaders() }
+        );
+        return response.data;
+      });
     } catch (error2) {
       throw wrapError(error2);
     }
@@ -36449,12 +36504,14 @@ var SalesforceClient = class {
   async createRecord(objectType2, data) {
     await this.ensureAuth();
     try {
-      const response = await this.client.post(
-        `${this.baseUrl()}/sobjects/${objectType2}`,
-        data,
-        { headers: this.authHeaders() }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.post(
+          `${this.baseUrl()}/sobjects/${objectType2}`,
+          data,
+          { headers: this.authHeaders() }
+        );
+        return response.data;
+      });
     } catch (error2) {
       throw wrapError(error2);
     }
@@ -36462,11 +36519,13 @@ var SalesforceClient = class {
   async updateRecord(objectType2, id, data) {
     await this.ensureAuth();
     try {
-      await this.client.patch(
-        `${this.baseUrl()}/sobjects/${objectType2}/${id}`,
-        data,
-        { headers: this.authHeaders() }
-      );
+      await this.withAuthRetry(async () => {
+        await this.client.patch(
+          `${this.baseUrl()}/sobjects/${objectType2}/${id}`,
+          data,
+          { headers: this.authHeaders() }
+        );
+      });
     } catch (error2) {
       throw wrapError(error2);
     }
@@ -36474,10 +36533,12 @@ var SalesforceClient = class {
   async deleteRecord(objectType2, id) {
     await this.ensureAuth();
     try {
-      await this.client.delete(
-        `${this.baseUrl()}/sobjects/${objectType2}/${id}`,
-        { headers: this.authHeaders() }
-      );
+      await this.withAuthRetry(async () => {
+        await this.client.delete(
+          `${this.baseUrl()}/sobjects/${objectType2}/${id}`,
+          { headers: this.authHeaders() }
+        );
+      });
     } catch (error2) {
       throw wrapError(error2);
     }
@@ -36485,11 +36546,13 @@ var SalesforceClient = class {
   async describeObject(objectType2) {
     await this.ensureAuth();
     try {
-      const response = await this.client.get(
-        `${this.baseUrl()}/sobjects/${objectType2}/describe`,
-        { headers: this.authHeaders() }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get(
+          `${this.baseUrl()}/sobjects/${objectType2}/describe`,
+          { headers: this.authHeaders() }
+        );
+        return response.data;
+      });
     } catch (error2) {
       throw wrapError(error2);
     }
@@ -36497,11 +36560,13 @@ var SalesforceClient = class {
   async listObjects() {
     await this.ensureAuth();
     try {
-      const response = await this.client.get(
-        `${this.baseUrl()}/sobjects`,
-        { headers: this.authHeaders() }
-      );
-      return response.data.sobjects;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get(
+          `${this.baseUrl()}/sobjects`,
+          { headers: this.authHeaders() }
+        );
+        return response.data.sobjects;
+      });
     } catch (error2) {
       throw wrapError(error2);
     }
@@ -36509,8 +36574,10 @@ var SalesforceClient = class {
   async getLimits() {
     await this.ensureAuth();
     try {
-      const response = await this.client.get(`${this.baseUrl()}/limits`, { headers: this.authHeaders() });
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get(`${this.baseUrl()}/limits`, { headers: this.authHeaders() });
+        return response.data;
+      });
     } catch (error2) {
       throw wrapError(error2);
     }
@@ -36521,14 +36588,16 @@ var SalesforceClient = class {
   async toolingQuery(soql) {
     await this.ensureAuth();
     try {
-      const response = await this.client.get(
-        `${this.toolingBaseUrl()}/query`,
-        {
-          params: { q: soql },
-          headers: this.authHeaders()
-        }
-      );
-      return response.data;
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.get(
+          `${this.toolingBaseUrl()}/query`,
+          {
+            params: { q: soql },
+            headers: this.authHeaders()
+          }
+        );
+        return response.data;
+      });
     } catch (error2) {
       throw wrapError(error2);
     }
