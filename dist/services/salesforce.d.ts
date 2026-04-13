@@ -16,6 +16,17 @@ declare class SalesforceClient {
     private client;
     private credentials;
     constructor(credentials: SalesforceCredentials);
+    /**
+     * Invalidate the cached token so the next ensureAuth() call
+     * will trigger a fresh authentication.
+     */
+    invalidateToken(): void;
+    /**
+     * Wrapper that executes an API call and, on auth-related errors
+     * (401 or 400 with session/auth messages), invalidates the token,
+     * re-authenticates, and retries once.
+     */
+    private withAuthRetry;
     private authenticateJwt;
     private authenticateSfCli;
     authenticate(): Promise<void>;
@@ -40,6 +51,11 @@ declare class SalesforceClient {
     private toolingBaseUrl;
     toolingQuery<T = SalesforceRecord>(soql: string): Promise<QueryResult<T>>;
 }
+/**
+ * Reset the singleton client, forcing a fresh instance and re-authentication
+ * on the next getSalesforceClient() call.
+ */
+export declare function resetSalesforceClient(): void;
 export declare function getSalesforceClient(): SalesforceClient;
 export {};
 //# sourceMappingURL=salesforce.d.ts.map
