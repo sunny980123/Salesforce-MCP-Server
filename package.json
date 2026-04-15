@@ -1,6 +1,6 @@
 {
   "name": "@sunny980123/salesforce-mcp-server",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Salesforce MCP Server — Claude와 Salesforce CRM을 연결하는 MCP 서버. 표준 SOQL/SOSL과 Tooling API를 모두 지원합니다.",
   "type": "module",
   "main": "dist/index.cjs",

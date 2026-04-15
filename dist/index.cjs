@@ -36370,10 +36370,12 @@ var SalesforceClient = class {
     const username = this.credentials.sfCliUsername;
     try {
       const result = (0, import_child_process.execSync)(
-        `sf org display --target-org ${username} --json`,
+        `sf org display --target-org ${username} --json 2>/dev/null`,
         { encoding: "utf-8" }
       );
-      const data = JSON.parse(result);
+      const jsonStart = result.indexOf("{");
+      const jsonStr = jsonStart >= 0 ? result.slice(jsonStart) : result;
+      const data = JSON.parse(jsonStr);
       if (!data.result?.accessToken || !data.result?.instanceUrl) {
         throw new Error(
           `SF CLI returned incomplete data for ${username}. accessToken: ${!!data.result?.accessToken}, instanceUrl: ${!!data.result?.instanceUrl}. Run 'sf org login web --instance-url <url>' to re-authenticate.`

@@ -2,153 +2,154 @@
 
 Salesforce CRM과 Claude를 연결하는 MCP 서버입니다. 표준 SOQL/SOSL 쿼리, 레코드 CRUD, 오브젝트 메타데이터 탐색, **Tooling API(ValidationRule·Flow·Apex 메타데이터)** 기능을 제공합니다.
 
-## 팀원 온보딩 (처음 설치하는 경우)
+**특징**:
+- 🔐 **SF CLI 기반 자동 토큰 갱신** — 한 번 로그인하면 토큰 만료 걱정 없음
+- 🧰 **클론/빌드 불필요** — `npx`로 바로 실행
+- 🛡️ **권한 모드 3단계** — 풀 액세스 / 삭제 금지 / 읽기 전용
 
-**클론/빌드 필요 없음!** 아래 순서대로 따라하면 5분 안에 완료됩니다.
+---
 
-### 1단계: SF CLI 설치
+## 팀원 온보딩 (5분 완료)
+
+### 1단계: 필수 도구 설치
 
 ```bash
-brew install sf
+brew install node sf
+npm install -g @anthropic-ai/claude-code
 ```
+
+> 이미 설치되어 있으면 건너뛰세요. (`node -v`, `sf --version`, `claude --version`으로 확인)
 
 ### 2단계: Salesforce 로그인
 
 ```bash
-sf org login web --instance-url https://[회사 org 주소].my.salesforce.com
+sf org login web --instance-url https://channel-b.my.salesforce.com
 ```
 
-→ 브라우저가 열리면 본인 계정으로 로그인
+브라우저가 열리면 본인 `@channel.io` 계정으로 로그인. 터미널에 `Successfully authorized ...` 뜨면 완료입니다.
 
-### 3단계: 토큰 확인
+### 3단계: MCP 서버 등록 (한 줄로 복붙 — 본인 이메일만 교체!)
 
 ```bash
-sf org display --target-org [본인 이메일] --json
+claude mcp add -s user salesforce -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io -e PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin -e SALESFORCE_NO_DELETE=true -- npx -y github:sunny980123/Salesforce-MCP-Server
 ```
 
-결과에서 두 값을 복사해두세요:
+> ⚠️ 대괄호(`[`, `]`)는 쓰지 마세요. `SALESFORCE_SF_CLI_USERNAME=neil@channel.io` 처럼 **값만** 넣으세요.
 
-```json
-{
-  "accessToken": "00D2w...  ← SALESFORCE_ACCESS_TOKEN",
-  "instanceUrl": "https://xxx.my.salesforce.com  ← SALESFORCE_INSTANCE_URL"
-}
-```
-
-### 4단계: MCP 서버 등록
-
-```bash
-claude mcp add salesforce \
-  -e SALESFORCE_ACCESS_TOKEN=여기에붙여넣기 \
-  -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com \
-  -e SALESFORCE_READONLY=true \
-  -- npx -y github:sunny980123/Salesforce-MCP-Server
-```
-
-### 5단계: 확인
+### 4단계: 확인
 
 ```bash
 claude mcp list
 ```
 
-`salesforce` 서버가 목록에 보이면 완료입니다 🎉
+`salesforce: ... - ✓ Connected` 가 보이면 완료 🎉
 
----
-
-## 토큰 만료 시 갱신
-
-```bash
-# 토큰 재발급
-sf org login web --instance-url https://[org 주소].my.salesforce.com
-sf org display --target-org [본인 이메일] --json
-
-# MCP 재등록
-claude mcp remove salesforce
-claude mcp add salesforce \
-  -e SALESFORCE_ACCESS_TOKEN=새토큰 \
-  -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com \
-  -e SALESFORCE_READONLY=true \
-  -- npx -y github:sunny980123/Salesforce-MCP-Server
-```
-
----
-
-## 소스에서 직접 빌드 (개발자용)
-
-**처음 설치하는 경우** → [GUIDE.md](./GUIDE.md) 를 따라주세요. (비개발자도 따라할 수 있는 단계별 가이드)
-
-```bash
-git clone https://github.com/sunny980123/Salesforce-MCP-Server.git
-cd Salesforce-MCP-Server
-npm install && npm run build
-```
-
-Claude Code 설정:
-
-```json
-{
-  "mcpServers": {
-    "salesforce": {
-      "command": "node",
-      "args": ["/Users/[유저명]/Downloads/Salesforce-MCP-Server/dist/index.js"],
-      "env": {
-        "SALESFORCE_ACCESS_TOKEN": "00D2w...",
-        "SALESFORCE_INSTANCE_URL": "https://yourorg.my.salesforce.com"
-      }
-    }
-  }
-}
-```
+이후 Claude Code에서 **"Salesforce에서 최근 생성된 리드 5개 보여줘"** 같은 요청으로 테스트해보세요.
 
 ---
 
 ## 인증 방식
 
-이 서버는 **Salesforce CLI를 통한 Access Token** 방식을 사용합니다. Security Token이나 Connected App 설정이 필요 없습니다.
+이 서버는 **Salesforce CLI를 통한 자동 토큰 갱신** 방식을 사용합니다. Security Token, Connected App, JWT 키 설정 모두 필요 없습니다.
+
+- SF CLI가 refresh token을 관리 → 토큰 만료 시 자동 재발급
+- 사용자가 `sf org logout` 하지 않는 한 토큰 갱신 신경 쓸 필요 없음
 
 ### 환경변수
 
 | 변수 | 필수 | 설명 |
-|------|------|------|
-| `SALESFORCE_ACCESS_TOKEN` | ✅ | SF CLI로 발급한 Access Token |
-| `SALESFORCE_INSTANCE_URL` | ✅ | Salesforce org URL (예: `https://yourorg.my.salesforce.com`) |
-| `SALESFORCE_READONLY` | ➖ | `true`로 설정 시 조회만 가능 (생성·수정·삭제 차단) |
+|------|:---:|------|
+| `SALESFORCE_SF_CLI_USERNAME` | ✅ | SF CLI에 로그인된 이메일 (예: `jay@channel.io`) |
+| `PATH` | ✅ | `/opt/homebrew/bin` 포함 필수 (MCP 프로세스가 `sf` 찾을 수 있도록) |
+| `SALESFORCE_NO_DELETE` | ➖ | `true` 시 삭제만 차단 (생성/수정은 허용) |
+| `SALESFORCE_READONLY` | ➖ | `true` 시 모든 쓰기 차단 (조회만) |
 
-### 권한 모드
+> `PATH`를 빠뜨리면 MCP 서버가 `sf` 명령어를 못 찾아 **조용히 실패**합니다. 꼭 포함하세요.
 
-#### 🔓 풀 액세스 (기본값)
-조회, 생성, 수정, 삭제 모두 가능합니다.
+---
+
+## 권한 모드
+
+| 모드 | 설정 | 조회 | 생성 | 수정 | 삭제 |
+|------|------|:---:|:---:|:---:|:---:|
+| 🔓 풀 액세스 | (기본값) | ✅ | ✅ | ✅ | ✅ |
+| 🛡️ 삭제 금지 **(팀원 추천)** | `SALESFORCE_NO_DELETE=true` | ✅ | ✅ | ✅ | ❌ |
+| 🔒 읽기 전용 | `SALESFORCE_READONLY=true` | ✅ | ❌ | ❌ | ❌ |
+
+### 🛡️ 삭제 금지 모드 (팀원 공유 추천)
+
+실수로 데이터가 지워지는 걸 방지하면서 일반 CRM 작업은 모두 허용합니다.
 
 ```bash
-claude mcp add salesforce \
-  -e SALESFORCE_ACCESS_TOKEN=00D2w... \
-  -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com \
+claude mcp add -s user salesforce \
+  -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io \
+  -e PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin \
+  -e SALESFORCE_NO_DELETE=true \
   -- npx -y github:sunny980123/Salesforce-MCP-Server
 ```
 
-#### 🔒 읽기 전용 모드 (팀원 공유 추천)
-조회·검색만 가능하며, 생성·수정·삭제 시도 시 오류를 반환합니다.
+### 🔒 읽기 전용 모드
+
+조회만 허용. 감사/분석 용도로 안전하게 공유할 때 사용합니다.
 
 ```bash
-claude mcp add salesforce \
-  -e SALESFORCE_ACCESS_TOKEN=00D2w... \
-  -e SALESFORCE_INSTANCE_URL=https://yourorg.my.salesforce.com \
+claude mcp add -s user salesforce \
+  -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io \
+  -e PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin \
   -e SALESFORCE_READONLY=true \
   -- npx -y github:sunny980123/Salesforce-MCP-Server
 ```
 
-| 도구 | 풀 액세스 | 읽기 전용 |
-|------|:---------:|:---------:|
-| `salesforce_query` | ✅ | ✅ |
-| `salesforce_search` | ✅ | ✅ |
-| `salesforce_get_record` | ✅ | ✅ |
-| `salesforce_describe_object` | ✅ | ✅ |
-| `salesforce_list_objects` | ✅ | ✅ |
-| `salesforce_get_limits` | ✅ | ✅ |
-| `salesforce_tooling_query` | ✅ | ✅ |
-| `salesforce_create_record` | ✅ | ❌ |
-| `salesforce_update_record` | ✅ | ❌ |
-| `salesforce_delete_record` | ✅ | ❌ |
+### 도구별 권한 매트릭스
+
+| 도구 | 풀 액세스 | 삭제 금지 | 읽기 전용 |
+|------|:---:|:---:|:---:|
+| `salesforce_query` | ✅ | ✅ | ✅ |
+| `salesforce_search` | ✅ | ✅ | ✅ |
+| `salesforce_get_record` | ✅ | ✅ | ✅ |
+| `salesforce_describe_object` | ✅ | ✅ | ✅ |
+| `salesforce_list_objects` | ✅ | ✅ | ✅ |
+| `salesforce_get_limits` | ✅ | ✅ | ✅ |
+| `salesforce_metadata_query` | ✅ | ✅ | ✅ |
+| `salesforce_create_record` | ✅ | ✅ | ❌ |
+| `salesforce_update_record` | ✅ | ✅ | ❌ |
+| `salesforce_delete_record` | ✅ | ❌ | ❌ |
+
+---
+
+## 트러블슈팅
+
+### `NamedOrgNotFoundError: No authorization information found for ...`
+
+→ `SALESFORCE_SF_CLI_USERNAME` 값이 잘못되었거나, 해당 이메일로 `sf org login web`을 하지 않았습니다.
+
+```bash
+# 현재 로그인된 org 확인
+sf org list
+
+# 필요하면 재로그인
+sf org login web --instance-url https://channel-b.my.salesforce.com
+
+# MCP 재등록 (이메일 정확히 입력 — 대괄호 X)
+claude mcp remove salesforce -s user
+claude mcp add -s user salesforce -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io -e PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin -e SALESFORCE_NO_DELETE=true -- npx -y github:sunny980123/Salesforce-MCP-Server
+```
+
+### `zsh: command not found: claude`
+
+→ Claude Code CLI가 설치되지 않았습니다.
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+### `sf: command not found` (MCP 서버 내부 로그)
+
+→ `PATH` 환경변수를 빠뜨렸습니다. MCP 프로세스는 shell profile을 상속받지 않으므로 명시적으로 `/opt/homebrew/bin`을 추가해야 합니다.
+
+### 팀원이 기존 project-scoped 설정과 충돌
+
+이전에 다른 방식으로 등록한 적이 있으면 `~/.claude.json`에 project-scoped 엔트리가 남아있을 수 있습니다. [GUIDE.md](./GUIDE.md)의 정리 스크립트를 참고하세요.
 
 ---
 
@@ -172,7 +173,7 @@ claude mcp add salesforce \
 
 | 도구 | 설명 |
 |------|------|
-| `salesforce_tooling_query` | Tooling API로 메타데이터 오브젝트 조회 |
+| `salesforce_metadata_query` | Tooling API로 메타데이터 오브젝트 조회 |
 
 표준 SOQL로 접근할 수 없는 설정/메타데이터 조회에 사용합니다:
 
@@ -205,3 +206,28 @@ claude mcp add salesforce \
 
 ---
 
+## 소스에서 직접 빌드 (개발자용)
+
+서버 코드를 수정하거나 기여하려는 경우:
+
+```bash
+git clone https://github.com/sunny980123/Salesforce-MCP-Server.git
+cd Salesforce-MCP-Server
+npm install && npm run build
+```
+
+Claude Code에 로컬 빌드로 등록:
+
+```bash
+claude mcp add -s user salesforce \
+  -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io \
+  -e PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin \
+  -e SALESFORCE_NO_DELETE=true \
+  -- node ~/Salesforce-MCP-Server/dist/index.cjs
+```
+
+---
+
+## 라이선스
+
+MIT

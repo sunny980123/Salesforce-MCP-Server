@@ -132,10 +132,13 @@ class SalesforceClient {
     const username = this.credentials.sfCliUsername!;
     try {
       const result = execSync(
-        `sf org display --target-org ${username} --json`,
+        `sf org display --target-org ${username} --json 2>/dev/null`,
         { encoding: "utf-8" }
       );
-      const data = JSON.parse(result);
+      // SF CLI may prefix warnings before the JSON — extract only the JSON part
+      const jsonStart = result.indexOf("{");
+      const jsonStr = jsonStart >= 0 ? result.slice(jsonStart) : result;
+      const data = JSON.parse(jsonStr);
 
       if (!data.result?.accessToken || !data.result?.instanceUrl) {
         throw new Error(
