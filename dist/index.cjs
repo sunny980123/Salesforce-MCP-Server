@@ -37405,6 +37405,411 @@ Returns:
   );
 }
 
+// src/services/sfCli.ts
+var import_child_process2 = require("child_process");
+var import_fs2 = require("fs");
+var import_os = require("os");
+var import_path = require("path");
+var SUPPORTED_METADATA_TYPES = [
+  "Flow",
+  "ApexClass",
+  "ApexTrigger",
+  "ValidationRule",
+  "PermissionSet",
+  "Layout",
+  "CustomObject"
+];
+function resolveMetadataPaths(type, apiName, objectName) {
+  switch (type) {
+    case "Flow":
+      return { xmlPath: `flows/${apiName}.flow-meta.xml` };
+    case "ApexClass":
+      return {
+        xmlPath: `classes/${apiName}.cls-meta.xml`,
+        bodyPath: `classes/${apiName}.cls`
+      };
+    case "ApexTrigger":
+      return {
+        xmlPath: `triggers/${apiName}.trigger-meta.xml`,
+        bodyPath: `triggers/${apiName}.trigger`
+      };
+    case "ValidationRule":
+      if (!objectName) {
+        throw new Error(
+          "object_name is required for ValidationRule (parent sObject API name)."
+        );
+      }
+      return {
+        xmlPath: `objects/${objectName}/validationRules/${apiName}.validationRule-meta.xml`
+      };
+    case "PermissionSet":
+      return {
+        xmlPath: `permissionsets/${apiName}.permissionset-meta.xml`
+      };
+    case "Layout":
+      return { xmlPath: `layouts/${apiName}.layout-meta.xml` };
+    case "CustomObject":
+      return { xmlPath: `objects/${apiName}/${apiName}.object-meta.xml` };
+  }
+}
+function createTempSfdxProject() {
+  const dir = (0, import_fs2.mkdtempSync)((0, import_path.join)((0, import_os.tmpdir)(), "sfmcp-"));
+  const apiVersion = SF_API_VERSION.replace(/^v/, "");
+  const sfdxProject = {
+    packageDirectories: [{ path: "force-app", default: true }],
+    namespace: "",
+    sfdcLoginUrl: "https://login.salesforce.com",
+    sourceApiVersion: apiVersion
+  };
+  (0, import_fs2.writeFileSync)(
+    (0, import_path.join)(dir, "sfdx-project.json"),
+    JSON.stringify(sfdxProject, null, 2)
+  );
+  (0, import_fs2.mkdirSync)((0, import_path.join)(dir, "force-app", "main", "default"), { recursive: true });
+  return dir;
+}
+function writeMetadataFiles(projectDir, paths, xmlContent, bodyContent) {
+  const base = (0, import_path.join)(projectDir, "force-app", "main", "default");
+  const xmlFull = (0, import_path.join)(base, paths.xmlPath);
+  (0, import_fs2.mkdirSync)((0, import_path.dirname)(xmlFull), { recursive: true });
+  (0, import_fs2.writeFileSync)(xmlFull, xmlContent);
+  if (paths.bodyPath) {
+    if (bodyContent === void 0) {
+      throw new Error(
+        `body_content is required for this metadata type (expected ${paths.bodyPath}).`
+      );
+    }
+    const bodyFull = (0, import_path.join)(base, paths.bodyPath);
+    (0, import_fs2.mkdirSync)((0, import_path.dirname)(bodyFull), { recursive: true });
+    (0, import_fs2.writeFileSync)(bodyFull, bodyContent);
+  }
+}
+function readRetrievedFiles(projectDir, paths) {
+  const base = (0, import_path.join)(projectDir, "force-app", "main", "default");
+  const xmlFull = (0, import_path.join)(base, paths.xmlPath);
+  if (!(0, import_fs2.existsSync)(xmlFull)) {
+    throw new Error(
+      `Retrieved file not found at ${paths.xmlPath}. The component may not exist in the org, or retrieval returned nothing.`
+    );
+  }
+  const xml = (0, import_fs2.readFileSync)(xmlFull, "utf-8");
+  let body;
+  if (paths.bodyPath) {
+    const bodyFull = (0, import_path.join)(base, paths.bodyPath);
+    if ((0, import_fs2.existsSync)(bodyFull)) {
+      body = (0, import_fs2.readFileSync)(bodyFull, "utf-8");
+    }
+  }
+  return { xml, body };
+}
+function cleanupProject(dir) {
+  try {
+    (0, import_fs2.rmSync)(dir, { recursive: true, force: true });
+  } catch {
+  }
+}
+function runSfJson(args, options = {}) {
+  const fullArgs = [...args, "--json"];
+  const cmd = ["sf", ...fullArgs].join(" ");
+  try {
+    const out = (0, import_child_process2.execSync)(cmd, {
+      encoding: "utf-8",
+      cwd: options.cwd,
+      timeout: options.timeoutMs ?? 3e5,
+      maxBuffer: 20 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    return parseJsonFromOutput(out);
+  } catch (error2) {
+    if (error2 && typeof error2 === "object" && "stdout" in error2 && error2.stdout) {
+      const stdout = error2.stdout;
+      const text = typeof stdout === "string" ? stdout : Buffer.from(stdout).toString("utf-8");
+      try {
+        return parseJsonFromOutput(text);
+      } catch {
+      }
+    }
+    const msg = error2 instanceof Error ? error2.message : String(error2);
+    throw new Error(`sf CLI command failed: ${cmd}
+${msg}`);
+  }
+}
+function parseJsonFromOutput(out) {
+  const jsonStart = out.indexOf("{");
+  if (jsonStart < 0) {
+    throw new Error(`No JSON payload in sf output: ${out.slice(0, 500)}`);
+  }
+  return JSON.parse(out.slice(jsonStart));
+}
+
+// src/tools/deploy.ts
+var isReadOnly2 = process.env.SALESFORCE_READONLY === "true";
+function requireTargetOrg() {
+  const target = process.env.SALESFORCE_SF_CLI_USERNAME;
+  if (!target) {
+    throw new Error(
+      "Deploy/retrieve tools require SALESFORCE_SF_CLI_USERNAME (SF CLI auth). Run 'sf org login web --instance-url <url>' to authorize an org, then set the env var."
+    );
+  }
+  return target;
+}
+var metadataTypeEnum = external_exports.enum(
+  SUPPORTED_METADATA_TYPES
+);
+var API_NAME_REGEX = /^[A-Za-z][A-Za-z0-9_]*$/;
+function registerDeployTools(server2) {
+  server2.registerTool(
+    "salesforce_deploy_metadata",
+    {
+      title: "Deploy Salesforce Metadata",
+      description: `Deploy a metadata component (Flow, ApexClass, ValidationRule, etc.) to the Salesforce org via the SF CLI.
+
+Use this to create OR update declarative metadata. Salesforce deploy is upsert-style:
+if 'api_name' already exists in the org, this overwrites it.
+
+Typical workflow for creating a new Flow:
+  1. (Optional) salesforce_retrieve_metadata to pull an existing Flow as a template
+  2. Author the Flow XML (<Flow xmlns="http://soap.sforce.com/2006/04/metadata">...)
+  3. Call this tool with check_only=true to validate (dry-run)
+  4. Re-run with check_only=false to actually deploy
+
+Supported metadata types:
+  ${SUPPORTED_METADATA_TYPES.join(", ")}
+
+Args:
+  - metadata_type: One of the supported types above.
+  - api_name: Metadata API name, e.g. 'My_New_Flow'. Must match Salesforce naming rules.
+  - xml_content: Full *-meta.xml content. For Flows, a complete <Flow> document.
+  - body_content: Required for ApexClass (.cls body) and ApexTrigger (.trigger body).
+  - object_name: Required for ValidationRule \u2014 parent sObject (e.g. 'Account').
+  - check_only: If true, validate without committing (dry-run). Default: false.
+
+Blocked entirely when SALESFORCE_READONLY=true (including dry-runs).
+Requires SALESFORCE_SF_CLI_USERNAME and the Salesforce user to have metadata deploy
+permissions (e.g. 'Customize Application' or 'Modify Metadata Through Metadata API Functions').
+
+Returns:
+  Deploy status with per-component successes and failures (with error messages).`,
+      inputSchema: external_exports.object({
+        metadata_type: metadataTypeEnum.describe(
+          `Metadata type. Supported: ${SUPPORTED_METADATA_TYPES.join(", ")}`
+        ),
+        api_name: external_exports.string().min(1).regex(
+          API_NAME_REGEX,
+          "Must be a valid Salesforce API name (alphanumeric + underscores, starts with a letter)"
+        ).describe("Metadata API name (e.g., My_New_Flow)"),
+        xml_content: external_exports.string().min(1).describe("Full *-meta.xml content for the component"),
+        body_content: external_exports.string().optional().describe(
+          "Body text \u2014 required for ApexClass (.cls) and ApexTrigger (.trigger)"
+        ),
+        object_name: external_exports.string().optional().describe("Parent sObject API name \u2014 required for ValidationRule"),
+        check_only: external_exports.boolean().default(false).describe("Validate only (dry-run). Default: false")
+      }).strict(),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async ({
+      metadata_type,
+      api_name,
+      xml_content,
+      body_content,
+      object_name,
+      check_only
+    }) => {
+      if (isReadOnly2) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: "\u274C \uC77D\uAE30 \uC804\uC6A9 \uBAA8\uB4DC\uC785\uB2C8\uB2E4. \uBA54\uD0C0\uB370\uC774\uD130 \uBC30\uD3EC \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."
+            }
+          ]
+        };
+      }
+      let projectDir;
+      try {
+        const targetOrg = requireTargetOrg();
+        const paths = resolveMetadataPaths(
+          metadata_type,
+          api_name,
+          object_name
+        );
+        projectDir = createTempSfdxProject();
+        writeMetadataFiles(projectDir, paths, xml_content, body_content);
+        const args = [
+          "project",
+          "deploy",
+          "start",
+          "--source-dir",
+          "force-app",
+          "--target-org",
+          targetOrg,
+          "--wait",
+          "10"
+        ];
+        if (check_only) args.push("--dry-run");
+        const result = runSfJson(args, { cwd: projectDir });
+        const success = result.result?.success === true || result.status === 0 && (result.result?.numberComponentErrors ?? 0) === 0;
+        const verb = check_only ? "Validation" : "Deploy";
+        const headline = success ? `${verb} succeeded for ${metadata_type}: ${api_name}` : `${verb} failed for ${metadata_type}: ${api_name}`;
+        const details = result.result?.details;
+        const failures = details?.componentFailures ?? [];
+        const successes = details?.componentSuccesses ?? result.result?.deployedSource ?? [];
+        const lines = [
+          `# ${headline}`,
+          "",
+          `- **Target org**: ${targetOrg}`,
+          `- **Dry-run**: ${check_only}`,
+          `- **Status**: ${result.result?.status ?? (success ? "Succeeded" : "Failed")}`,
+          ""
+        ];
+        if (failures.length > 0) {
+          lines.push("## Failures");
+          for (const f of failures) {
+            const name = String(f.fullName ?? "");
+            const ctype = String(f.componentType ?? "");
+            const problem = String(f.problem ?? f.error ?? "unknown error");
+            lines.push(`- **${name}** (${ctype}): ${problem}`);
+          }
+          lines.push("");
+        }
+        if (!success && result.message) {
+          lines.push(`**Error**: ${result.message}`);
+          lines.push("");
+        }
+        if (successes.length > 0) {
+          lines.push(`## Deployed components (${successes.length})`);
+          for (const s of successes) {
+            lines.push(`- ${String(s.fullName ?? s.filePath ?? "")}`);
+          }
+        }
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
+          structuredContent: {
+            success,
+            dryRun: check_only,
+            targetOrg,
+            result: result.result,
+            message: result.message
+          },
+          ...success ? {} : { isError: true }
+        };
+      } catch (error2) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Error: ${error2 instanceof Error ? error2.message : String(error2)}`
+            }
+          ]
+        };
+      } finally {
+        if (projectDir) cleanupProject(projectDir);
+      }
+    }
+  );
+  server2.registerTool(
+    "salesforce_retrieve_metadata",
+    {
+      title: "Retrieve Salesforce Metadata",
+      description: `Retrieve a metadata component (Flow, ApexClass, ValidationRule, etc.) from the Salesforce org as XML via SF CLI.
+
+Use this to:
+  - Inspect an existing Flow's XML as a reference before authoring a new one
+  - Fetch a component, modify the XML, then redeploy via salesforce_deploy_metadata
+
+Supported metadata types: ${SUPPORTED_METADATA_TYPES.join(", ")}
+
+Args:
+  - metadata_type: The type of metadata to retrieve
+  - api_name: Metadata API name
+  - object_name: Required for ValidationRule (parent sObject)
+
+Requires SALESFORCE_SF_CLI_USERNAME. This tool is read-only \u2014 allowed even under SALESFORCE_READONLY.
+
+Returns:
+  The raw *-meta.xml content (and .cls/.trigger body for Apex).`,
+      inputSchema: external_exports.object({
+        metadata_type: metadataTypeEnum.describe(
+          `Metadata type. Supported: ${SUPPORTED_METADATA_TYPES.join(", ")}`
+        ),
+        api_name: external_exports.string().min(1).regex(
+          API_NAME_REGEX,
+          "Must be a valid Salesforce API name (alphanumeric + underscores, starts with a letter)"
+        ).describe("Metadata API name"),
+        object_name: external_exports.string().optional().describe("Parent sObject API name \u2014 required for ValidationRule")
+      }).strict(),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async ({ metadata_type, api_name, object_name }) => {
+      let projectDir;
+      try {
+        const targetOrg = requireTargetOrg();
+        const paths = resolveMetadataPaths(
+          metadata_type,
+          api_name,
+          object_name
+        );
+        projectDir = createTempSfdxProject();
+        const metadataArg = metadata_type === "ValidationRule" ? `ValidationRule:${object_name}.${api_name}` : `${metadata_type}:${api_name}`;
+        const args = [
+          "project",
+          "retrieve",
+          "start",
+          "--metadata",
+          metadataArg,
+          "--target-org",
+          targetOrg,
+          "--wait",
+          "10"
+        ];
+        runSfJson(args, { cwd: projectDir });
+        const { xml, body } = readRetrievedFiles(projectDir, paths);
+        const lines = [
+          `# ${metadata_type}: ${api_name}`,
+          "",
+          `- **Target org**: ${targetOrg}`,
+          "",
+          "## Meta XML",
+          "```xml",
+          xml,
+          "```"
+        ];
+        if (body !== void 0) {
+          lines.push("", "## Body", "```", body, "```");
+        }
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
+          structuredContent: { metadata_type, api_name, xml, body }
+        };
+      } catch (error2) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Error: ${error2 instanceof Error ? error2.message : String(error2)}`
+            }
+          ]
+        };
+      } finally {
+        if (projectDir) cleanupProject(projectDir);
+      }
+    }
+  );
+}
+
 // src/index.ts
 var server = new McpServer({
   name: "salesforce-mcp-server",
@@ -37413,6 +37818,7 @@ var server = new McpServer({
 registerQueryTools(server);
 registerRecordTools(server);
 registerMetadataTools(server);
+registerDeployTools(server);
 async function main() {
   const hasSfCliAuth = process.env.SALESFORCE_SF_CLI_USERNAME;
   const hasTokenAuth = process.env.SALESFORCE_ACCESS_TOKEN && process.env.SALESFORCE_INSTANCE_URL;

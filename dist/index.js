@@ -13,6 +13,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { registerQueryTools } from "./tools/query.js";
 import { registerRecordTools } from "./tools/records.js";
 import { registerMetadataTools } from "./tools/metadata.js";
+import { registerDeployTools } from "./tools/deploy.js";
 const server = new McpServer({
     name: "salesforce-mcp-server",
     version: "1.0.0",
@@ -20,6 +21,7 @@ const server = new McpServer({
 registerQueryTools(server);
 registerRecordTools(server);
 registerMetadataTools(server);
+registerDeployTools(server);
 async function main() {
     const hasSfCliAuth = process.env.SALESFORCE_SF_CLI_USERNAME;
     const hasTokenAuth = process.env.SALESFORCE_ACCESS_TOKEN && process.env.SALESFORCE_INSTANCE_URL;

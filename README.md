@@ -1,6 +1,6 @@
 # Salesforce MCP Server
 
-Salesforce CRM과 Claude를 연결하는 MCP 서버입니다. 표준 SOQL/SOSL 쿼리, 레코드 CRUD, 오브젝트 메타데이터 탐색, **Tooling API(ValidationRule·Flow·Apex 메타데이터)** 기능을 제공합니다.
+Salesforce CRM과 Claude를 연결하는 MCP 서버입니다. 표준 SOQL/SOSL 쿼리, 레코드 CRUD, 오브젝트 메타데이터 탐색, **Tooling API(ValidationRule·Flow·Apex 메타데이터)**, **메타데이터 배포/추출(Flow·ApexClass·ValidationRule 등 생성/수정)** 기능을 제공합니다.
 
 **특징**:
 - 🔐 **SF CLI 기반 자동 토큰 갱신** — 한 번 로그인하면 토큰 만료 걱정 없음
@@ -111,8 +111,10 @@ claude mcp add -s user salesforce \
 | `salesforce_list_objects` | ✅ | ✅ | ✅ |
 | `salesforce_get_limits` | ✅ | ✅ | ✅ |
 | `salesforce_metadata_query` | ✅ | ✅ | ✅ |
+| `salesforce_retrieve_metadata` | ✅ | ✅ | ✅ |
 | `salesforce_create_record` | ✅ | ✅ | ❌ |
 | `salesforce_update_record` | ✅ | ✅ | ❌ |
+| `salesforce_deploy_metadata` | ✅ | ✅ | ❌ |
 | `salesforce_delete_record` | ✅ | ❌ | ❌ |
 
 ---
@@ -203,6 +205,47 @@ npm install -g @anthropic-ai/claude-code
 4. 특정 Flow의 전체 로직 조회
    → SELECT Id, MasterLabel, Metadata FROM Flow WHERE Id = '301...'
 ```
+
+### 🚀 메타데이터 배포/추출 (Flow 생성·수정 등)
+
+| 도구 | 설명 |
+|------|------|
+| `salesforce_retrieve_metadata` | Flow/ApexClass/ValidationRule 등을 XML로 추출 (읽기 전용) |
+| `salesforce_deploy_metadata` | Flow/ApexClass/ValidationRule 등을 생성/수정 배포 (upsert) |
+
+지원 타입: `Flow`, `ApexClass`, `ApexTrigger`, `ValidationRule`, `PermissionSet`, `Layout`, `CustomObject`
+
+**내부 동작**: 임시 SFDX 프로젝트를 만들고 로컬의 `sf project deploy start` / `sf project retrieve start` 명령을 실행합니다. 따라서 **`sf` CLI가 PATH에 있고 `SALESFORCE_SF_CLI_USERNAME`이 설정돼 있어야** 합니다.
+
+#### ⚠️ 별도의 Salesforce 권한 필요
+
+메타데이터 배포는 레코드 CRUD와 **다른 권한 체계**를 사용합니다. Deploy 툴을 쓰려면 Salesforce 유저 프로필 또는 Permission Set에 아래 중 하나가 있어야 합니다:
+
+- **`Customize Application`** — 가장 일반적, Flow/ValidationRule 등 대부분 커버
+- **`Modify Metadata Through Metadata API Functions`** — Metadata API 전용의 더 좁은 권한
+
+`salesforce_retrieve_metadata`는 객체 정의 읽기 권한만 있으면 동작합니다.
+
+> **MCP 서버의 `SALESFORCE_READONLY=true`** 는 배포 툴을 자체적으로 차단합니다 — Salesforce 권한과 별개로 이중 방어선.
+> `SALESFORCE_NO_DELETE=true`는 배포에 영향을 주지 않습니다 (배포는 delete가 아닌 upsert).
+
+#### Flow 생성/수정 워크플로우
+
+```
+1. (선택) 기존 Flow를 템플릿으로 추출
+   salesforce_retrieve_metadata(metadata_type="Flow", api_name="Existing_Flow")
+
+2. XML 편집 (Claude가 제안/생성)
+
+3. dry-run 검증
+   salesforce_deploy_metadata(metadata_type="Flow", api_name="My_New_Flow",
+                              xml_content="<?xml...", check_only=true)
+
+4. 실배포
+   salesforce_deploy_metadata(..., check_only=false)
+```
+
+> 💡 **팁**: 새 Flow를 처음 만들 땐 반드시 `status=Draft`로 생성하세요. Active로 바로 배포하면 프로덕션에서 즉시 실행됩니다.
 
 ---
 
