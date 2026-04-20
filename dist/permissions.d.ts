@@ -10,6 +10,8 @@
  *     response as NO_DELETE / READONLY modes.
  */
 export declare function isOwner(): boolean;
+/** Owner OR explicitly listed deployer. */
+export declare function canDeploy(): boolean;
 /** True when `SALESFORCE_READONLY=true`. */
 export declare function isReadOnlyMode(): boolean;
 /** True when `SALESFORCE_NO_DELETE=true`. */
@@ -24,10 +26,11 @@ export declare function isDeleteDisabled(): boolean;
 /**
  * Metadata deploy is disabled when ANY of:
  *   - `SALESFORCE_READONLY=true`
- *   - caller is not in the owner allowlist
+ *   - caller is not in the owner or deployer allowlist
  *
- * Deploy can overwrite production Flow/Apex logic, so it is gated
- * identically to delete (owner-only), independent of NO_DELETE.
+ * Deploy can overwrite production Flow/Apex logic, so it is restricted
+ * to an explicit allowlist (owners + named deployers). It is independent
+ * of NO_DELETE — a deployer may still be in NO_DELETE mode.
  */
 export declare function isDeployDisabled(): boolean;
 //# sourceMappingURL=permissions.d.ts.map

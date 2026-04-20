@@ -9,11 +9,25 @@
  *     owner mechanism; they simply receive the same "permission denied"
  *     response as NO_DELETE / READONLY modes.
  */
-// SF CLI usernames that may perform destructive operations (delete, deploy).
+// Tier 1: full access including delete. Hardcoded.
 const OWNER_USERNAMES = ["sunny@channel.io"];
+// Tier 2: may deploy metadata (Flow/Apex/etc) but may NOT delete records.
+// Owners are implicitly deployers — no need to list them here.
+const DEPLOYER_USERNAMES = [
+    "east@channel.io",
+    "wendy@channel.io",
+    "aya@channel.io",
+];
+function getUsername() {
+    return process.env.SALESFORCE_SF_CLI_USERNAME?.toLowerCase() ?? "";
+}
 export function isOwner() {
-    const username = process.env.SALESFORCE_SF_CLI_USERNAME?.toLowerCase() ?? "";
-    return OWNER_USERNAMES.includes(username);
+    return OWNER_USERNAMES.includes(getUsername());
+}
+/** Owner OR explicitly listed deployer. */
+export function canDeploy() {
+    const u = getUsername();
+    return OWNER_USERNAMES.includes(u) || DEPLOYER_USERNAMES.includes(u);
 }
 /** True when `SALESFORCE_READONLY=true`. */
 export function isReadOnlyMode() {
@@ -35,12 +49,13 @@ export function isDeleteDisabled() {
 /**
  * Metadata deploy is disabled when ANY of:
  *   - `SALESFORCE_READONLY=true`
- *   - caller is not in the owner allowlist
+ *   - caller is not in the owner or deployer allowlist
  *
- * Deploy can overwrite production Flow/Apex logic, so it is gated
- * identically to delete (owner-only), independent of NO_DELETE.
+ * Deploy can overwrite production Flow/Apex logic, so it is restricted
+ * to an explicit allowlist (owners + named deployers). It is independent
+ * of NO_DELETE — a deployer may still be in NO_DELETE mode.
  */
 export function isDeployDisabled() {
-    return isReadOnlyMode() || !isOwner();
+    return isReadOnlyMode() || !canDeploy();
 }
 //# sourceMappingURL=permissions.js.map

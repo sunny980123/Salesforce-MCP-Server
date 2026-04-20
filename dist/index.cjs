@@ -36909,9 +36909,20 @@ Note: Queries with Metadata or FullName fields must return exactly 1 row (use WH
 
 // src/permissions.ts
 var OWNER_USERNAMES = ["sunny@channel.io"];
+var DEPLOYER_USERNAMES = [
+  "east@channel.io",
+  "wendy@channel.io",
+  "aya@channel.io"
+];
+function getUsername() {
+  return process.env.SALESFORCE_SF_CLI_USERNAME?.toLowerCase() ?? "";
+}
 function isOwner() {
-  const username = process.env.SALESFORCE_SF_CLI_USERNAME?.toLowerCase() ?? "";
-  return OWNER_USERNAMES.includes(username);
+  return OWNER_USERNAMES.includes(getUsername());
+}
+function canDeploy() {
+  const u = getUsername();
+  return OWNER_USERNAMES.includes(u) || DEPLOYER_USERNAMES.includes(u);
 }
 function isReadOnlyMode() {
   return process.env.SALESFORCE_READONLY === "true";
@@ -36923,7 +36934,7 @@ function isDeleteDisabled() {
   return isNoDeleteMode() || isReadOnlyMode() || !isOwner();
 }
 function isDeployDisabled() {
-  return isReadOnlyMode() || !isOwner();
+  return isReadOnlyMode() || !canDeploy();
 }
 
 // src/tools/records.ts
