@@ -36907,6 +36907,25 @@ Note: Queries with Metadata or FullName fields must return exactly 1 row (use WH
   );
 }
 
+// src/permissions.ts
+var OWNER_USERNAMES = ["sunny@channel.io"];
+function isOwner() {
+  const username = process.env.SALESFORCE_SF_CLI_USERNAME?.toLowerCase() ?? "";
+  return OWNER_USERNAMES.includes(username);
+}
+function isReadOnlyMode() {
+  return process.env.SALESFORCE_READONLY === "true";
+}
+function isNoDeleteMode() {
+  return process.env.SALESFORCE_NO_DELETE === "true";
+}
+function isDeleteDisabled() {
+  return isNoDeleteMode() || isReadOnlyMode() || !isOwner();
+}
+function isDeployDisabled() {
+  return isReadOnlyMode() || !isOwner();
+}
+
 // src/tools/records.ts
 var COMMON_OBJECTS = [
   "Account",
@@ -36924,8 +36943,6 @@ var COMMON_OBJECTS = [
   "Quote",
   "User"
 ];
-var isReadOnly = process.env.SALESFORCE_READONLY === "true";
-var isDeleteDisabled = process.env.SALESFORCE_NO_DELETE === "true" || isReadOnly;
 function registerRecordTools(server2) {
   server2.registerTool(
     "salesforce_get_record",
@@ -37027,7 +37044,7 @@ Examples:
       }
     },
     async ({ object_type, fields }) => {
-      if (isReadOnly) {
+      if (isReadOnlyMode()) {
         return { isError: true, content: [{ type: "text", text: "\u274C \uC77D\uAE30 \uC804\uC6A9 \uBAA8\uB4DC\uC785\uB2C8\uB2E4. \uB808\uCF54\uB4DC \uC0DD\uC131 \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }] };
       }
       try {
@@ -37082,7 +37099,7 @@ Examples:
       }
     },
     async ({ object_type, record_id, fields }) => {
-      if (isReadOnly) {
+      if (isReadOnlyMode()) {
         return { isError: true, content: [{ type: "text", text: "\u274C \uC77D\uAE30 \uC804\uC6A9 \uBAA8\uB4DC\uC785\uB2C8\uB2E4. \uB808\uCF54\uB4DC \uC218\uC815 \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }] };
       }
       try {
@@ -37129,7 +37146,7 @@ Warning: This operation moves the record to the Recycle Bin. It can be restored 
       }
     },
     async ({ object_type, record_id }) => {
-      if (isDeleteDisabled) {
+      if (isDeleteDisabled()) {
         return { isError: true, content: [{ type: "text", text: "\u274C \uB808\uCF54\uB4DC \uC0AD\uC81C \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }] };
       }
       try {
@@ -37543,7 +37560,6 @@ function parseJsonFromOutput(out) {
 }
 
 // src/tools/deploy.ts
-var isReadOnly2 = process.env.SALESFORCE_READONLY === "true";
 function requireTargetOrg() {
   const target = process.env.SALESFORCE_SF_CLI_USERNAME;
   if (!target) {
@@ -37620,13 +37636,13 @@ Returns:
       object_name,
       check_only
     }) => {
-      if (isReadOnly2) {
+      if (isDeployDisabled()) {
         return {
           isError: true,
           content: [
             {
               type: "text",
-              text: "\u274C \uC77D\uAE30 \uC804\uC6A9 \uBAA8\uB4DC\uC785\uB2C8\uB2E4. \uBA54\uD0C0\uB370\uC774\uD130 \uBC30\uD3EC \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."
+              text: "\u274C \uBA54\uD0C0\uB370\uC774\uD130 \uBC30\uD3EC \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."
             }
           ]
         };

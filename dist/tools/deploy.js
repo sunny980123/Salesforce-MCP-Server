@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { SUPPORTED_METADATA_TYPES, createTempSfdxProject, writeMetadataFiles, cleanupProject, resolveMetadataPaths, runSfJson, readRetrievedFiles, } from "../services/sfCli.js";
+import { isDeployDisabled } from "../permissions.js";
 // Policy:
 //   SALESFORCE_READONLY=true   → deploy blocked (even dry-run)
-//   SALESFORCE_NO_DELETE=true  → deploy allowed (deploy is upsert, not delete)
+//   Non-owner caller           → deploy blocked (owner-only safeguard)
+//   SALESFORCE_NO_DELETE=true  → deploy allowed for owners (deploy is upsert, not delete)
 // retrieve is always allowed (read-only).
-const isReadOnly = process.env.SALESFORCE_READONLY === "true";
 function requireTargetOrg() {
     const target = process.env.SALESFORCE_SF_CLI_USERNAME;
     if (!target) {
@@ -78,13 +79,13 @@ Returns:
             openWorldHint: true,
         },
     }, async ({ metadata_type, api_name, xml_content, body_content, object_name, check_only, }) => {
-        if (isReadOnly) {
+        if (isDeployDisabled()) {
             return {
                 isError: true,
                 content: [
                     {
                         type: "text",
-                        text: "❌ 읽기 전용 모드입니다. 메타데이터 배포 권한이 없습니다.",
+                        text: "❌ 메타데이터 배포 권한이 없습니다.",
                     },
                 ],
             };

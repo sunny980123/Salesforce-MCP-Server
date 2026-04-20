@@ -2,15 +2,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { CHARACTER_LIMIT, ResponseFormat } from "../constants.js";
 import { getSalesforceClient } from "../services/salesforce.js";
+import { isDeleteDisabled, isReadOnlyMode } from "../permissions.js";
 
 const COMMON_OBJECTS = [
   "Account", "Contact", "Lead", "Opportunity", "Case",
   "Task", "Event", "Campaign", "Product2", "Pricebook2",
   "Contract", "Order", "Quote", "User",
 ] as const;
-
-const isReadOnly = process.env.SALESFORCE_READONLY === "true";
-const isDeleteDisabled = process.env.SALESFORCE_NO_DELETE === "true" || isReadOnly;
 
 export function registerRecordTools(server: McpServer): void {
   // Get Record
@@ -136,7 +134,7 @@ Examples:
       },
     },
     async ({ object_type, fields }) => {
-      if (isReadOnly) {
+      if (isReadOnlyMode()) {
         return { isError: true, content: [{ type: "text", text: "❌ 읽기 전용 모드입니다. 레코드 생성 권한이 없습니다." }] };
       }
       try {
@@ -201,7 +199,7 @@ Examples:
       },
     },
     async ({ object_type, record_id, fields }) => {
-      if (isReadOnly) {
+      if (isReadOnlyMode()) {
         return { isError: true, content: [{ type: "text", text: "❌ 읽기 전용 모드입니다. 레코드 수정 권한이 없습니다." }] };
       }
       try {
@@ -257,7 +255,7 @@ Warning: This operation moves the record to the Recycle Bin. It can be restored 
       },
     },
     async ({ object_type, record_id }) => {
-      if (isDeleteDisabled) {
+      if (isDeleteDisabled()) {
         return { isError: true, content: [{ type: "text", text: "❌ 레코드 삭제 권한이 없습니다." }] };
       }
       try {

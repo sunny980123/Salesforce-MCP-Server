@@ -1,11 +1,11 @@
 # Salesforce MCP Server
 
-Salesforce CRM과 Claude를 연결하는 MCP 서버입니다. 표준 SOQL/SOSL 쿼리, 레코드 CRUD, 오브젝트 메타데이터 탐색, **Tooling API(ValidationRule·Flow·Apex 메타데이터)**, **메타데이터 배포/추출(Flow·ApexClass·ValidationRule 등 생성/수정)** 기능을 제공합니다.
+Salesforce CRM과 Claude를 연결하는 MCP 서버입니다. 표준 SOQL/SOSL 쿼리, 레코드 CRUD, 오브젝트 메타데이터 탐색, **Tooling API(ValidationRule·Flow·Apex 메타데이터)**, **메타데이터 추출(Flow·ApexClass·ValidationRule 등 XML 읽기)** 기능을 제공합니다.
 
 **특징**:
 - 🔐 **SF CLI 기반 자동 토큰 갱신** — 한 번 로그인하면 토큰 만료 걱정 없음
 - 🧰 **클론/빌드 불필요** — `npx`로 바로 실행
-- 🛡️ **권한 모드 3단계** — 풀 액세스 / 삭제 금지 / 읽기 전용
+- 🛡️ **안전한 권한 모드** — 삭제 금지 / 읽기 전용
 
 ---
 
@@ -70,10 +70,11 @@ claude mcp list
 
 ## 권한 모드
 
+팀원 공유 시 아래 2가지 모드 중 하나를 사용하세요. **레코드 삭제 및 메타데이터 배포는 이 서버를 통해 제공되지 않습니다.**
+
 | 모드 | 설정 | 조회 | 생성 | 수정 | 삭제 |
 |------|------|:---:|:---:|:---:|:---:|
-| 🔓 풀 액세스 | (기본값) | ✅ | ✅ | ✅ | ✅ |
-| 🛡️ 삭제 금지 **(팀원 추천)** | `SALESFORCE_NO_DELETE=true` | ✅ | ✅ | ✅ | ❌ |
+| 🛡️ 삭제 금지 **(권장)** | `SALESFORCE_NO_DELETE=true` | ✅ | ✅ | ✅ | ❌ |
 | 🔒 읽기 전용 | `SALESFORCE_READONLY=true` | ✅ | ❌ | ❌ | ❌ |
 
 ### 🛡️ 삭제 금지 모드 (팀원 공유 추천)
@@ -102,20 +103,20 @@ claude mcp add -s user salesforce \
 
 ### 도구별 권한 매트릭스
 
-| 도구 | 풀 액세스 | 삭제 금지 | 읽기 전용 |
-|------|:---:|:---:|:---:|
-| `salesforce_query` | ✅ | ✅ | ✅ |
-| `salesforce_search` | ✅ | ✅ | ✅ |
-| `salesforce_get_record` | ✅ | ✅ | ✅ |
-| `salesforce_describe_object` | ✅ | ✅ | ✅ |
-| `salesforce_list_objects` | ✅ | ✅ | ✅ |
-| `salesforce_get_limits` | ✅ | ✅ | ✅ |
-| `salesforce_metadata_query` | ✅ | ✅ | ✅ |
-| `salesforce_retrieve_metadata` | ✅ | ✅ | ✅ |
-| `salesforce_create_record` | ✅ | ✅ | ❌ |
-| `salesforce_update_record` | ✅ | ✅ | ❌ |
-| `salesforce_deploy_metadata` | ✅ | ✅ | ❌ |
-| `salesforce_delete_record` | ✅ | ❌ | ❌ |
+| 도구 | 삭제 금지 | 읽기 전용 |
+|------|:---:|:---:|
+| `salesforce_query` | ✅ | ✅ |
+| `salesforce_search` | ✅ | ✅ |
+| `salesforce_get_record` | ✅ | ✅ |
+| `salesforce_describe_object` | ✅ | ✅ |
+| `salesforce_list_objects` | ✅ | ✅ |
+| `salesforce_get_limits` | ✅ | ✅ |
+| `salesforce_metadata_query` | ✅ | ✅ |
+| `salesforce_retrieve_metadata` | ✅ | ✅ |
+| `salesforce_create_record` | ✅ | ❌ |
+| `salesforce_update_record` | ✅ | ❌ |
+| `salesforce_delete_record` | ❌ | ❌ |
+| `salesforce_deploy_metadata` | ❌ | ❌ |
 
 ---
 
@@ -206,46 +207,24 @@ npm install -g @anthropic-ai/claude-code
    → SELECT Id, MasterLabel, Metadata FROM Flow WHERE Id = '301...'
 ```
 
-### 🚀 메타데이터 배포/추출 (Flow 생성·수정 등)
+### 🚀 메타데이터 추출 (Flow·Apex XML 읽기)
 
 | 도구 | 설명 |
 |------|------|
 | `salesforce_retrieve_metadata` | Flow/ApexClass/ValidationRule 등을 XML로 추출 (읽기 전용) |
-| `salesforce_deploy_metadata` | Flow/ApexClass/ValidationRule 등을 생성/수정 배포 (upsert) |
 
 지원 타입: `Flow`, `ApexClass`, `ApexTrigger`, `ValidationRule`, `PermissionSet`, `Layout`, `CustomObject`
 
-**내부 동작**: 임시 SFDX 프로젝트를 만들고 로컬의 `sf project deploy start` / `sf project retrieve start` 명령을 실행합니다. 따라서 **`sf` CLI가 PATH에 있고 `SALESFORCE_SF_CLI_USERNAME`이 설정돼 있어야** 합니다.
+**내부 동작**: 임시 SFDX 프로젝트를 만들고 로컬의 `sf project retrieve start` 명령을 실행합니다. 따라서 **`sf` CLI가 PATH에 있고 `SALESFORCE_SF_CLI_USERNAME`이 설정돼 있어야** 합니다.
 
-#### ⚠️ 별도의 Salesforce 권한 필요
+객체 정의 읽기 권한만 있으면 동작하며, 모든 권한 모드(삭제 금지 / 읽기 전용)에서 사용 가능합니다.
 
-메타데이터 배포는 레코드 CRUD와 **다른 권한 체계**를 사용합니다. Deploy 툴을 쓰려면 Salesforce 유저 프로필 또는 Permission Set에 아래 중 하나가 있어야 합니다:
-
-- **`Customize Application`** — 가장 일반적, Flow/ValidationRule 등 대부분 커버
-- **`Modify Metadata Through Metadata API Functions`** — Metadata API 전용의 더 좁은 권한
-
-`salesforce_retrieve_metadata`는 객체 정의 읽기 권한만 있으면 동작합니다.
-
-> **MCP 서버의 `SALESFORCE_READONLY=true`** 는 배포 툴을 자체적으로 차단합니다 — Salesforce 권한과 별개로 이중 방어선.
-> `SALESFORCE_NO_DELETE=true`는 배포에 영향을 주지 않습니다 (배포는 delete가 아닌 upsert).
-
-#### Flow 생성/수정 워크플로우
+#### 예시: 기존 Flow XML 읽어 분석
 
 ```
-1. (선택) 기존 Flow를 템플릿으로 추출
-   salesforce_retrieve_metadata(metadata_type="Flow", api_name="Existing_Flow")
-
-2. XML 편집 (Claude가 제안/생성)
-
-3. dry-run 검증
-   salesforce_deploy_metadata(metadata_type="Flow", api_name="My_New_Flow",
-                              xml_content="<?xml...", check_only=true)
-
-4. 실배포
-   salesforce_deploy_metadata(..., check_only=false)
+salesforce_retrieve_metadata(metadata_type="Flow", api_name="Existing_Flow")
+→ XML을 받아서 Flow 로직 분석, Claude가 요약 또는 개선안 제시
 ```
-
-> 💡 **팁**: 새 Flow를 처음 만들 땐 반드시 `status=Draft`로 생성하세요. Active로 바로 배포하면 프로덕션에서 즉시 실행됩니다.
 
 ---
 
