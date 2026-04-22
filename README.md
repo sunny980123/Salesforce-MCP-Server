@@ -207,6 +207,46 @@ npm install -g @anthropic-ai/claude-code
    → SELECT Id, MasterLabel, Metadata FROM Flow WHERE Id = '301...'
 ```
 
+### 🧪 Sandbox 관리
+
+| 도구 | 설명 |
+|------|:---|
+| `salesforce_list_sandboxes` | 존재하는 sandbox + 생성 중인 SandboxProcess 목록 |
+| `salesforce_create_sandbox` | 새 sandbox 생성 (Developer/Dev Pro/Partial/Full) |
+
+이 툴들은 **prod MCP에서 호출**합니다 (sandbox 메타데이터는 prod org의 `SandboxInfo`에 저장).
+`create_sandbox`는 Salesforce 측 "Manage Sandboxes" 권한이 필요합니다.
+
+#### Sandbox 생성 → 접속 워크플로우
+
+```
+1. (prod MCP에서) sandbox 생성 요청
+   salesforce_create_sandbox(sandbox_name="MyDev", license_type="DEVELOPER")
+   → 비동기 생성 (Developer는 보통 수 분 ~ 수십 분)
+
+2. 진행 상태 확인
+   salesforce_list_sandboxes()
+   → SandboxProcess에서 CopyProgress 확인
+
+3. 완료 후 터미널에서 sandbox 로그인
+   sf org login web -r https://test.salesforce.com
+   → 브라우저에서 sandbox username(보통 원래username.mydev) 입력
+
+4. Sandbox 전용 MCP 등록 (prod MCP와 별도)
+   claude mcp add -s user salesforce-sandbox \
+     -e SALESFORCE_SF_CLI_USERNAME=본인이메일@channel.io.mydev \
+     -e PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin \
+     -e SALESFORCE_NO_DELETE=true \
+     -- npx -y github:sunny980123/Salesforce-MCP-Server
+
+5. Claude Code에서
+   → mcp__salesforce 툴은 prod, mcp__salesforce-sandbox 툴은 sandbox에 붙음
+```
+
+> **권한**: sandbox MCP에서도 prod와 동일한 권한 체계가 적용됩니다. Owner/Deployer allowlist 그대로.
+
+---
+
 ### 🚀 메타데이터 추출 (Flow·Apex XML 읽기)
 
 | 도구 | 설명 |

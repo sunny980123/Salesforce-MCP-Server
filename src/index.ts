@@ -15,6 +15,7 @@ import { registerQueryTools } from "./tools/query.js";
 import { registerRecordTools } from "./tools/records.js";
 import { registerMetadataTools } from "./tools/metadata.js";
 import { registerDeployTools } from "./tools/deploy.js";
+import { registerSandboxTools } from "./tools/sandbox.js";
 
 const server = new McpServer({
   name: "salesforce-mcp-server",
@@ -25,6 +26,7 @@ registerQueryTools(server);
 registerRecordTools(server);
 registerMetadataTools(server);
 registerDeployTools(server);
+registerSandboxTools(server);
 
 async function main(): Promise<void> {
   const hasSfCliAuth = process.env.SALESFORCE_SF_CLI_USERNAME;

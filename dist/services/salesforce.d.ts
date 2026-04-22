@@ -50,6 +50,10 @@ declare class SalesforceClient {
     }>>;
     private toolingBaseUrl;
     toolingQuery<T = SalesforceRecord>(soql: string): Promise<QueryResult<T>>;
+    /**
+     * Create a Tooling API sobject (used for SandboxInfo and similar metadata objects).
+     */
+    toolingCreate(objectType: string, data: Record<string, unknown>): Promise<SaveResult>;
 }
 /**
  * Reset the singleton client, forcing a fresh instance and re-authentication

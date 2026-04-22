@@ -306,6 +306,21 @@ class SalesforceClient {
             throw wrapError(error);
         }
     }
+    /**
+     * Create a Tooling API sobject (used for SandboxInfo and similar metadata objects).
+     */
+    async toolingCreate(objectType, data) {
+        await this.ensureAuth();
+        try {
+            return await this.withAuthRetry(async () => {
+                const response = await this.client.post(`${this.toolingBaseUrl()}/sobjects/${objectType}`, data, { headers: this.authHeaders() });
+                return response.data;
+            });
+        }
+        catch (error) {
+            throw wrapError(error);
+        }
+    }
 }
 function wrapError(error) {
     if (error instanceof AxiosError && error.response) {

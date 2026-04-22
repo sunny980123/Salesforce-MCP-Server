@@ -36604,6 +36604,24 @@ var SalesforceClient = class {
       throw wrapError(error2);
     }
   }
+  /**
+   * Create a Tooling API sobject (used for SandboxInfo and similar metadata objects).
+   */
+  async toolingCreate(objectType2, data) {
+    await this.ensureAuth();
+    try {
+      return await this.withAuthRetry(async () => {
+        const response = await this.client.post(
+          `${this.toolingBaseUrl()}/sobjects/${objectType2}`,
+          data,
+          { headers: this.authHeaders() }
+        );
+        return response.data;
+      });
+    } catch (error2) {
+      throw wrapError(error2);
+    }
+  }
 };
 function wrapError(error2) {
   if (error2 instanceof AxiosError2 && error2.response) {
@@ -37837,6 +37855,181 @@ Returns:
   );
 }
 
+// src/tools/sandbox.ts
+var LICENSE_TYPES = ["DEVELOPER", "DEVELOPER_PRO", "PARTIAL", "FULL"];
+var SANDBOX_NAME_REGEX = /^[A-Za-z][A-Za-z0-9]{0,9}$/;
+function truncate(text) {
+  if (text.length > CHARACTER_LIMIT) {
+    return text.slice(0, CHARACTER_LIMIT) + "\n\n_Response truncated._";
+  }
+  return text;
+}
+function registerSandboxTools(server2) {
+  server2.registerTool(
+    "salesforce_list_sandboxes",
+    {
+      title: "List Salesforce Sandboxes",
+      description: `List all sandboxes registered under the production org via Tooling API SandboxInfo.
+
+Shows both existing sandboxes and in-progress creations. For status of an in-progress
+creation, also check SandboxProcess records (use salesforce_metadata_query).
+
+Args:
+  - include_in_progress (bool): include SandboxProcess records for pending creations (default: true)
+
+Returns:
+  - SandboxInfo list: Id, SandboxName, LicenseType, Description, Status
+  - (optional) SandboxProcess list: recent creation progress
+
+Note: This tool must be run against the PRODUCTION org (sandboxes live under prod).`,
+      inputSchema: external_exports.object({
+        include_in_progress: external_exports.boolean().default(true),
+        response_format: external_exports.nativeEnum(ResponseFormat).default("markdown" /* MARKDOWN */)
+      }).strict(),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async ({ include_in_progress, response_format }) => {
+      try {
+        const sf = getSalesforceClient();
+        const info = await sf.toolingQuery(
+          "SELECT Id, SandboxName, LicenseType, Description FROM SandboxInfo ORDER BY SandboxName"
+        );
+        const processes = include_in_progress ? await sf.toolingQuery(
+          "SELECT Id, SandboxName, Status, CopyProgress, LicenseType, Description, StartDate, EndDate FROM SandboxProcess ORDER BY CreatedDate DESC LIMIT 20"
+        ).catch(() => ({ totalSize: 0, done: true, records: [] })) : null;
+        const output = {
+          sandboxes: info.records,
+          in_progress: processes?.records ?? []
+        };
+        if (response_format === "json" /* JSON */) {
+          return {
+            content: [{ type: "text", text: truncate(JSON.stringify(output, null, 2)) }],
+            structuredContent: output
+          };
+        }
+        const lines = [
+          `# Sandboxes (${info.totalSize})`,
+          "",
+          "| SandboxName | License | Description |",
+          "|-------------|---------|-------------|"
+        ];
+        for (const rec of info.records) {
+          lines.push(
+            `| \`${String(rec.SandboxName ?? "-")}\` | ${String(rec.LicenseType ?? "-")} | ${String(rec.Description ?? "")} |`
+          );
+        }
+        if (processes && processes.records.length) {
+          lines.push("", `## Recent SandboxProcess (${processes.records.length})`, "");
+          lines.push("| SandboxName | Status | CopyProgress | License | Start | End |");
+          lines.push("|-------------|:------:|:------------:|:-------:|-------|-----|");
+          for (const rec of processes.records) {
+            lines.push(
+              `| \`${String(rec.SandboxName ?? "-")}\` | ${String(rec.Status ?? "-")} | ${String(rec.CopyProgress ?? 0)}% | ${String(rec.LicenseType ?? "-")} | ${String(rec.StartDate ?? "-")} | ${String(rec.EndDate ?? "-")} |`
+            );
+          }
+        }
+        return {
+          content: [{ type: "text", text: truncate(lines.join("\n")) }],
+          structuredContent: output
+        };
+      } catch (error2) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Error: ${error2 instanceof Error ? error2.message : String(error2)}`
+            }
+          ]
+        };
+      }
+    }
+  );
+  server2.registerTool(
+    "salesforce_create_sandbox",
+    {
+      title: "Create Salesforce Sandbox",
+      description: `Create a new sandbox via Tooling API SandboxInfo. Requires Manage Sandboxes permission.
+
+Creation is asynchronous and can take minutes (Developer) to hours (Full).
+After creation, a SandboxProcess record tracks progress \u2014 use salesforce_list_sandboxes
+with include_in_progress=true to monitor.
+
+Args:
+  - sandbox_name: 1-10 chars, letters/digits, must start with a letter. Case-sensitive.
+  - license_type: DEVELOPER (default) | DEVELOPER_PRO | PARTIAL | FULL
+  - description (optional): free-form description
+
+Notes:
+  - DEVELOPER: config-only, metadata copy, refreshable daily
+  - DEVELOPER_PRO: same as DEVELOPER with more storage
+  - PARTIAL: sample of prod data (up to 5GB)
+  - FULL: complete prod clone (costly, limited quota)
+  - Must run against PRODUCTION org. After creation, connect via:
+    sf org login web -r https://test.salesforce.com
+    and register a separate MCP entry targeting the sandbox username.
+
+Caller must be in owner or deployer allowlist.`,
+      inputSchema: external_exports.object({
+        sandbox_name: external_exports.string().regex(SANDBOX_NAME_REGEX, "1-10 chars, letters/digits only, must start with a letter"),
+        license_type: external_exports.enum(LICENSE_TYPES).default("DEVELOPER"),
+        description: external_exports.string().max(255).optional()
+      }).strict(),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async ({ sandbox_name, license_type, description }) => {
+      if (!canDeploy()) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "\u274C sandbox \uC0DD\uC131 \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }]
+        };
+      }
+      try {
+        const sf = getSalesforceClient();
+        const body = {
+          SandboxName: sandbox_name,
+          LicenseType: license_type
+        };
+        if (description) body.Description = description;
+        const result = await sf.toolingCreate("SandboxInfo", body);
+        const text = `\u2705 Sandbox \uC0DD\uC131 \uC694\uCCAD \uC811\uC218\uB428.
+- **SandboxInfo Id**: ${result.id}
+- **SandboxName**: ${sandbox_name}
+- **License**: ${license_type}
+
+\uC0DD\uC131\uC740 \uBE44\uB3D9\uAE30\uB85C \uC9C4\uD589\uB429\uB2C8\uB2E4. \uC9C4\uD589 \uC0C1\uD0DC\uB294 salesforce_list_sandboxes\uB85C \uD655\uC778\uD558\uC138\uC694.
+\uC644\uB8CC \uD6C4 \uC811\uC18D\uC740:
+  sf org login web -r https://test.salesforce.com
+  (\uD504\uB86C\uD504\uD2B8\uC5D0\uC11C sandbox username \uC785\uB825 \u2014 \uBCF4\uD1B5 \uC6D0\uB798username.${sandbox_name.toLowerCase()})`;
+        return {
+          content: [{ type: "text", text }],
+          structuredContent: result
+        };
+      } catch (error2) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Error: ${error2 instanceof Error ? error2.message : String(error2)}`
+            }
+          ]
+        };
+      }
+    }
+  );
+}
+
 // src/index.ts
 var server = new McpServer({
   name: "salesforce-mcp-server",
@@ -37846,6 +38039,7 @@ registerQueryTools(server);
 registerRecordTools(server);
 registerMetadataTools(server);
 registerDeployTools(server);
+registerSandboxTools(server);
 async function main() {
   const hasSfCliAuth = process.env.SALESFORCE_SF_CLI_USERNAME;
   const hasTokenAuth = process.env.SALESFORCE_ACCESS_TOKEN && process.env.SALESFORCE_INSTANCE_URL;
