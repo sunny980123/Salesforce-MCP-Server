@@ -12,6 +12,12 @@
 export declare function isOwner(): boolean;
 /** Owner OR explicitly listed deployer. */
 export declare function canDeploy(): boolean;
+/**
+ * Owner OR deployer OR explicitly listed writer.
+ * Deployers and owners inherit write capability automatically.
+ * Enforces server-side: env vars cannot upgrade a non-writer.
+ */
+export declare function canWrite(): boolean;
 /** True when `SALESFORCE_READONLY=true`. */
 export declare function isReadOnlyMode(): boolean;
 /** True when `SALESFORCE_NO_DELETE=true`. */

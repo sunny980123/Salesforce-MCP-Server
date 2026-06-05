@@ -18,6 +18,18 @@ const DEPLOYER_USERNAMES = [
     "wendy@channel.io",
     "aya@channel.io",
 ];
+// Tier 3: may create/update records, but NOT deploy metadata or delete records.
+// Owners and deployers inherit write capability automatically — no need to list.
+const WRITER_USERNAMES = [
+    "ray@channel.io",
+    "harry@channel.io",
+    "jay@channel.io",
+    "haze@channel.io",
+    "lea@channel.io",
+    "neil@channel.io",
+    "kevin@channel.io",
+    "damon@channel.io",
+];
 function getUsername() {
     return process.env.SALESFORCE_SF_CLI_USERNAME?.toLowerCase() ?? "";
 }
@@ -28,6 +40,17 @@ export function isOwner() {
 export function canDeploy() {
     const u = getUsername();
     return OWNER_USERNAMES.includes(u) || DEPLOYER_USERNAMES.includes(u);
+}
+/**
+ * Owner OR deployer OR explicitly listed writer.
+ * Deployers and owners inherit write capability automatically.
+ * Enforces server-side: env vars cannot upgrade a non-writer.
+ */
+export function canWrite() {
+    const u = getUsername();
+    return (OWNER_USERNAMES.includes(u) ||
+        DEPLOYER_USERNAMES.includes(u) ||
+        WRITER_USERNAMES.includes(u));
 }
 /** True when `SALESFORCE_READONLY=true`. */
 export function isReadOnlyMode() {

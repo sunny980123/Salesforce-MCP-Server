@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { CHARACTER_LIMIT, ResponseFormat } from "../constants.js";
 import { getSalesforceClient } from "../services/salesforce.js";
-import { isDeleteDisabled, isReadOnlyMode } from "../permissions.js";
+import { canWrite, isDeleteDisabled, isReadOnlyMode } from "../permissions.js";
 
 const COMMON_OBJECTS = [
   "Account", "Contact", "Lead", "Opportunity", "Case",
@@ -134,8 +134,8 @@ Examples:
       },
     },
     async ({ object_type, fields }) => {
-      if (isReadOnlyMode()) {
-        return { isError: true, content: [{ type: "text", text: "❌ 읽기 전용 모드입니다. 레코드 생성 권한이 없습니다." }] };
+      if (isReadOnlyMode() || !canWrite()) {
+        return { isError: true, content: [{ type: "text", text: "❌ 레코드 생성 권한이 없습니다." }] };
       }
       try {
         const sf = getSalesforceClient();
@@ -199,8 +199,8 @@ Examples:
       },
     },
     async ({ object_type, record_id, fields }) => {
-      if (isReadOnlyMode()) {
-        return { isError: true, content: [{ type: "text", text: "❌ 읽기 전용 모드입니다. 레코드 수정 권한이 없습니다." }] };
+      if (isReadOnlyMode() || !canWrite()) {
+        return { isError: true, content: [{ type: "text", text: "❌ 레코드 수정 권한이 없습니다." }] };
       }
       try {
         const sf = getSalesforceClient();

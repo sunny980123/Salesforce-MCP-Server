@@ -36932,6 +36932,16 @@ var DEPLOYER_USERNAMES = [
   "wendy@channel.io",
   "aya@channel.io"
 ];
+var WRITER_USERNAMES = [
+  "ray@channel.io",
+  "harry@channel.io",
+  "jay@channel.io",
+  "haze@channel.io",
+  "lea@channel.io",
+  "neil@channel.io",
+  "kevin@channel.io",
+  "damon@channel.io"
+];
 function getUsername() {
   return process.env.SALESFORCE_SF_CLI_USERNAME?.toLowerCase() ?? "";
 }
@@ -36941,6 +36951,10 @@ function isOwner() {
 function canDeploy() {
   const u = getUsername();
   return OWNER_USERNAMES.includes(u) || DEPLOYER_USERNAMES.includes(u);
+}
+function canWrite() {
+  const u = getUsername();
+  return OWNER_USERNAMES.includes(u) || DEPLOYER_USERNAMES.includes(u) || WRITER_USERNAMES.includes(u);
 }
 function isReadOnlyMode() {
   return process.env.SALESFORCE_READONLY === "true";
@@ -37073,8 +37087,8 @@ Examples:
       }
     },
     async ({ object_type, fields }) => {
-      if (isReadOnlyMode()) {
-        return { isError: true, content: [{ type: "text", text: "\u274C \uC77D\uAE30 \uC804\uC6A9 \uBAA8\uB4DC\uC785\uB2C8\uB2E4. \uB808\uCF54\uB4DC \uC0DD\uC131 \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }] };
+      if (isReadOnlyMode() || !canWrite()) {
+        return { isError: true, content: [{ type: "text", text: "\u274C \uB808\uCF54\uB4DC \uC0DD\uC131 \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }] };
       }
       try {
         const sf = getSalesforceClient();
@@ -37128,8 +37142,8 @@ Examples:
       }
     },
     async ({ object_type, record_id, fields }) => {
-      if (isReadOnlyMode()) {
-        return { isError: true, content: [{ type: "text", text: "\u274C \uC77D\uAE30 \uC804\uC6A9 \uBAA8\uB4DC\uC785\uB2C8\uB2E4. \uB808\uCF54\uB4DC \uC218\uC815 \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }] };
+      if (isReadOnlyMode() || !canWrite()) {
+        return { isError: true, content: [{ type: "text", text: "\u274C \uB808\uCF54\uB4DC \uC218\uC815 \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }] };
       }
       try {
         const sf = getSalesforceClient();
