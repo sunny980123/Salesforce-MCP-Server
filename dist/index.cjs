@@ -36369,24 +36369,61 @@ var SalesforceClient = class {
   authenticateSfCli() {
     const username = this.credentials.sfCliUsername;
     try {
-      const result = (0, import_child_process.execSync)(
+      const displayOut = (0, import_child_process.execSync)(
         `sf org display --target-org ${username} --json 2>/dev/null`,
         { encoding: "utf-8" }
       );
-      const jsonStart = result.indexOf("{");
-      const jsonStr = jsonStart >= 0 ? result.slice(jsonStart) : result;
-      const data = JSON.parse(jsonStr);
-      if (!data.result?.accessToken || !data.result?.instanceUrl) {
+      const displayJsonStart = displayOut.indexOf("{");
+      const displayData = JSON.parse(
+        displayJsonStart >= 0 ? displayOut.slice(displayJsonStart) : displayOut
+      );
+      const instanceUrl = displayData.result?.instanceUrl;
+      let accessToken = displayData.result?.accessToken;
+      if (!instanceUrl) {
         throw new Error(
-          `SF CLI returned incomplete data for ${username}. accessToken: ${!!data.result?.accessToken}, instanceUrl: ${!!data.result?.instanceUrl}. Run 'sf org login web --instance-url <url>' to re-authenticate.`
+          `SF CLI returned no instanceUrl for ${username}. Run 'sf org login web --instance-url <url>' to re-authenticate.`
         );
       }
-      this.accessToken = data.result.accessToken;
-      this.instanceUrl = data.result.instanceUrl;
+      const isRedacted = !accessToken || typeof accessToken === "string" && accessToken.toUpperCase().includes("REDACTED");
+      if (isRedacted) {
+        try {
+          const tokenOut = (0, import_child_process.execSync)(
+            `sf org auth show-access-token --target-org ${username} --json 2>/dev/null`,
+            { encoding: "utf-8" }
+          ).trim();
+          if (tokenOut.startsWith("{")) {
+            const tokenData = JSON.parse(tokenOut);
+            const r = tokenData.result;
+            if (typeof r === "string") {
+              accessToken = r;
+            } else if (r && typeof r === "object") {
+              accessToken = r.accessToken ?? r.access_token ?? r.token;
+            } else {
+              accessToken = tokenData.accessToken;
+            }
+          } else {
+            accessToken = tokenOut.replace(/^"|"$/g, "");
+          }
+        } catch (subErr) {
+          throw new Error(
+            `SF CLI redacts accessToken and 'sf org auth show-access-token' failed for ${username}. Details: ${subErr instanceof Error ? subErr.message : String(subErr)}. Upgrade sf CLI or re-run 'sf org login web' to refresh credentials.`
+          );
+        }
+      }
+      if (!accessToken || String(accessToken).toUpperCase().includes("REDACTED")) {
+        throw new Error(
+          `SF CLI returned no usable accessToken for ${username}. Run 'sf org login web --instance-url <url>' to re-authenticate.`
+        );
+      }
+      this.accessToken = String(accessToken);
+      this.instanceUrl = instanceUrl;
       this.tokenExpiresAt = Date.now() + 55 * 60 * 1e3;
       console.error("Salesforce token refreshed via SF CLI.");
     } catch (error2) {
       if (error2 instanceof Error && error2.message.includes("SF CLI returned")) {
+        throw error2;
+      }
+      if (error2 instanceof Error && error2.message.includes("SF CLI redacts")) {
         throw error2;
       }
       throw new Error(

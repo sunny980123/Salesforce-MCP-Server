@@ -131,30 +131,81 @@ class SalesforceClient {
   private authenticateSfCli(): void {
     const username = this.credentials.sfCliUsername!;
     try {
-      const result = execSync(
+      // Step 1: get instanceUrl from `sf org display`
+      const displayOut = execSync(
         `sf org display --target-org ${username} --json 2>/dev/null`,
         { encoding: "utf-8" }
       );
-      // SF CLI may prefix warnings before the JSON — extract only the JSON part
-      const jsonStart = result.indexOf("{");
-      const jsonStr = jsonStart >= 0 ? result.slice(jsonStart) : result;
-      const data = JSON.parse(jsonStr);
+      const displayJsonStart = displayOut.indexOf("{");
+      const displayData = JSON.parse(
+        displayJsonStart >= 0 ? displayOut.slice(displayJsonStart) : displayOut
+      );
+      const instanceUrl = displayData.result?.instanceUrl;
+      let accessToken = displayData.result?.accessToken;
 
-      if (!data.result?.accessToken || !data.result?.instanceUrl) {
+      if (!instanceUrl) {
         throw new Error(
-          `SF CLI returned incomplete data for ${username}. ` +
-          `accessToken: ${!!data.result?.accessToken}, instanceUrl: ${!!data.result?.instanceUrl}. ` +
+          `SF CLI returned no instanceUrl for ${username}. ` +
           "Run 'sf org login web --instance-url <url>' to re-authenticate."
         );
       }
 
-      this.accessToken = data.result.accessToken;
-      this.instanceUrl = data.result.instanceUrl;
+      // Step 2: newer SF CLI (>= 2.75) redacts accessToken in `sf org display`.
+      // If token is missing or literally "REDACTED", fall back to the dedicated
+      // access-token subcommand (available in newer versions).
+      const isRedacted =
+        !accessToken ||
+        (typeof accessToken === "string" && accessToken.toUpperCase().includes("REDACTED"));
+
+      if (isRedacted) {
+        try {
+          const tokenOut = execSync(
+            `sf org auth show-access-token --target-org ${username} --json 2>/dev/null`,
+            { encoding: "utf-8" }
+          ).trim();
+          // The command's --json output has been:
+          //   { "status": 0, "result": "00D..." }   (token as string in result)
+          //   { "status": 0, "result": { "accessToken": "00D..." } }  (nested, some versions)
+          // Non-json output is just the raw token.
+          if (tokenOut.startsWith("{")) {
+            const tokenData = JSON.parse(tokenOut);
+            const r = tokenData.result;
+            if (typeof r === "string") {
+              accessToken = r;
+            } else if (r && typeof r === "object") {
+              accessToken = r.accessToken ?? r.access_token ?? r.token;
+            } else {
+              accessToken = tokenData.accessToken;
+            }
+          } else {
+            accessToken = tokenOut.replace(/^"|"$/g, "");
+          }
+        } catch (subErr) {
+          throw new Error(
+            `SF CLI redacts accessToken and 'sf org auth show-access-token' failed for ${username}. ` +
+            `Details: ${subErr instanceof Error ? subErr.message : String(subErr)}. ` +
+            "Upgrade sf CLI or re-run 'sf org login web' to refresh credentials."
+          );
+        }
+      }
+
+      if (!accessToken || String(accessToken).toUpperCase().includes("REDACTED")) {
+        throw new Error(
+          `SF CLI returned no usable accessToken for ${username}. ` +
+          "Run 'sf org login web --instance-url <url>' to re-authenticate."
+        );
+      }
+
+      this.accessToken = String(accessToken);
+      this.instanceUrl = instanceUrl;
       this.tokenExpiresAt = Date.now() + 55 * 60 * 1000;
       console.error("Salesforce token refreshed via SF CLI.");
     } catch (error) {
       if (error instanceof Error && error.message.includes("SF CLI returned")) {
         throw error; // Re-throw our own validation error
+      }
+      if (error instanceof Error && error.message.includes("SF CLI redacts")) {
+        throw error;
       }
       throw new Error(
         `SF CLI authentication failed for ${username}: ${error instanceof Error ? error.message : String(error)}. ` +
