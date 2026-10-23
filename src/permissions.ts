@@ -56,6 +56,7 @@ const WRITER_USERNAMES: readonly string[] = [
   "cindy@channel.io",
   "mark@channel.io",
   "zio@channel.io",
+  "west@channel.io",
 ];
 
 function getUsername(): string {
