@@ -37002,7 +37002,8 @@ var WRITER_USERNAMES = [
   "cindy@channel.io",
   "mark@channel.io",
   "zio@channel.io",
-  "west@channel.io"
+  "west@channel.io",
+  "elia@channel.io"
 ];
 function getUsername() {
   return process.env.SALESFORCE_SF_CLI_USERNAME?.toLowerCase() ?? "";
